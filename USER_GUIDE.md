@@ -29,8 +29,16 @@ Copy `src/integrations/vscode/` to `~/.vscode/extensions/`
 - Individual blocks get "📋 Copy" buttons automatically
 - Use floating buttons for bulk operations
 
-### Full Chat Export
-Click "📄 Copy Full Chat" to export entire conversation as Markdown
+### Exporting Full Chat
+1. Navigate to a DeepSeek or Arena.ai conversation
+2. Click the **"📄 Copy Full Chat"** button in the floating toolbar
+3. The entire conversation is exported as Markdown to your clipboard
+4. Paste directly into your IDE or save as a `.md` file
+
+**Export Options:**
+- **Clipboard** — Copies formatted Markdown to clipboard (default)
+- **File** — Saves to `~/.deepseek-copier/exports/` with timestamp
+- **Both** — Copies to clipboard and saves to file
 
 ### Version History
 Open `web_dashboard/index.html` in your browser to view version history

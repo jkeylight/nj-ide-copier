@@ -1,36 +1,65 @@
 /**
- * Background Service Worker for NJ IDE Copier.
- * Routes messages between popup and content scripts.
+ * NJ IDE Copier - Background Service Worker v2.0
  */
 
-// Handle messages from popup
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === 'getServerStatus') {
-        fetch('http://localhost:8765/status')
-            .then(response => response.json())
-            .then(data => sendResponse({ status: 'online', data }))
-            .catch(() => sendResponse({ status: 'offline' }));
-        return true; // Keep message channel open for async response
-    }
+const SERVER_URL = 'http://localhost:8765';
 
-    if (request.action === 'forwardToContent') {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0]) {
-                chrome.tabs.sendMessage(tabs[0].id, request.payload);
-            }
-        });
-        sendResponse({ status: 'forwarded' });
+// Handle messages from content script and popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    console.log('[Background] Received message:', request.action);
+    
+    if (request.action === 'getServerStatus') {
+        checkServerStatus().then(sendResponse);
         return true;
     }
+    
+    if (request.action === 'copyToServer') {
+        sendToServer(request.data).then(sendResponse);
+        return true;
+    }
+    
+    return false;
 });
 
-// Handle keyboard shortcuts
-chrome.commands?.onCommand?.addListener((command) => {
-    if (command === 'copy-last-response') {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0]) {
-                chrome.tabs.sendMessage(tabs[0].id, { action: 'copyLastResponse' });
-            }
-        });
+async function checkServerStatus() {
+    try {
+        const response = await fetch(`${SERVER_URL}/status`);
+        return { status: response.ok ? 'connected' : 'disconnected' };
+    } catch (err) {
+        return { status: 'disconnected' };
     }
+}
+
+async function sendToServer(data) {
+    try {
+        const endpoint = data.endpoint || '/code/update';
+        const response = await fetch(`${SERVER_URL}${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data.payload)
+        });
+        
+        const result = await response.json();
+        return { success: true, data: result };
+    } catch (err) {
+        console.error('[Background] Server error:', err);
+        return { success: false, error: err.message };
+    }
+}
+
+// Badge management
+chrome.runtime.onInstalled.addListener(() => {
+    console.log('[NJ IDE Copier] Extension installed');
+    chrome.action.setBadgeText({ text: 'v2' });
+    chrome.action.setBadgeBackgroundColor({ color: '#667eea' });
 });
+
+// Update badge when server status changes
+setInterval(async () => {
+    const status = await checkServerStatus();
+    if (status.status === 'connected') {
+        chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
+    } else {
+        chrome.action.setBadgeBackgroundColor({ color: '#f44336' });
+    }
+}, 30000);

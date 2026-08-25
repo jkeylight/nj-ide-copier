@@ -23,6 +23,7 @@ DeepSeek Chat → Browser Extension → Local Server (Python) → IDE
 |---------|--------|
 | Code Block Detection | ✅ |
 | Full Chat Export | ✅ |
+| Arena.ai Support | ✅ |
 | Version Tracking | ✅ |
 | Error Detection | ✅ |
 | IDE Auto-Detection | ✅ |

@@ -1,113 +1,141 @@
 /**
- * Popup script for NJ IDE Copier.
- * Handles UI interactions and server status.
+ * NJ IDE Copier - Popup Script v2.0
  */
 
-document.addEventListener('DOMContentLoaded', async () => {
-    await updateStatus();
-    await detectPlatform();
+const SERVER_URL = 'http://localhost:8765';
 
-    // Button click handlers
-    document.getElementById('copyFullChat').addEventListener('click', () => {
-        sendAction('copyFullChat');
-    });
-
-    document.getElementById('copyLastResponse').addEventListener('click', () => {
-        sendAction('copyLastResponse');
-    });
-
-    document.getElementById('copyAllCode').addEventListener('click', () => {
-        sendAction('copyAllCode');
-    });
-
-    document.getElementById('exportMarkdown').addEventListener('click', () => {
-        sendAction('exportMarkdown');
-    });
-
-    // IDE selection
-    document.getElementById('ideSelect').addEventListener('change', (e) => {
-        chrome.storage.sync.set({ defaultIde: e.target.value });
-    });
-
-    // Load saved IDE preference
-    chrome.storage.sync.get(['defaultIde'], (result) => {
-        if (result.defaultIde) {
-            document.getElementById('ideSelect').value = result.defaultIde;
-        }
-    });
+document.addEventListener('DOMContentLoaded', () => {
+    checkServerStatus();
+    setupEventListeners();
 });
 
-function sendAction(action) {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]) {
-            chrome.tabs.sendMessage(tabs[0].id, { action: action }, (response) => {
-                if (chrome.runtime.lastError) {
-                    // Content script not available on this page
-                    showPlatformStatus('Visit an AI chat site to use');
-                }
-            });
-        }
-    });
-}
-
-async function detectPlatform() {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs[0]) {
-            const url = tabs[0].url || '';
-            let platform = 'Unknown';
-
-            if (url.includes('chatgpt.com') || url.includes('chat.openai.com')) platform = 'ChatGPT';
-            else if (url.includes('claude.ai')) platform = 'Claude';
-            else if (url.includes('deepseek.com')) platform = 'DeepSeek';
-            else if (url.includes('tongyi.aliyun.com') || url.includes('qianwen.aliyun.com')) platform = 'Qwen';
-            else if (url.includes('gemini.google.com')) platform = 'Gemini';
-            else if (url.includes('kimi.moonshot.cn')) platform = 'Kimi';
-            else if (url.includes('chatglm.cn')) platform = 'ChatGLM';
-            else if (url.includes('huggingface.co/chat')) platform = 'HuggingChat';
-            else if (url.includes('poe.com')) platform = 'Poe';
-            else if (url.includes('perplexity.ai')) platform = 'Perplexity';
-            else if (url.includes('you.com')) platform = 'You.com';
-
-            document.getElementById('currentPlatform').textContent = platform;
-
-            if (platform === 'Unknown') {
-                showPlatformStatus('Visit an AI chat site to use');
-            }
-        }
-    });
-}
-
-function showPlatformStatus(msg) {
-    document.getElementById('currentPlatform').textContent = msg;
-    document.getElementById('currentPlatform').style.color = '#FF9800';
-}
-
-async function updateStatus() {
+async function checkServerStatus() {
     try {
-        const response = await fetch('http://localhost:8765/status');
-        const status = await response.json();
-
-        document.getElementById('serverStatus').textContent = 'Running';
-        document.getElementById('serverStatus').style.color = '#4CAF50';
-
-        document.getElementById('activeIDE').textContent = status.active_ide || 'None detected';
-
-        // Update IDE selector with detected IDEs
-        const select = document.getElementById('ideSelect');
-        if (status.ides) {
-            status.ides.forEach(ide => {
-                const option = document.createElement('option');
-                option.value = ide.id;
-                option.textContent = ide.name;
-                select.appendChild(option);
-            });
+        const response = await fetch(`${SERVER_URL}/status`);
+        if (response.ok) {
+            updateStatus(true);
+        } else {
+            updateStatus(false);
         }
-    } catch (error) {
-        document.getElementById('serverStatus').textContent = 'Not Running';
-        document.getElementById('serverStatus').style.color = '#f44336';
-        document.getElementById('activeIDE').textContent = 'Start server first';
+    } catch (err) {
+        updateStatus(false);
     }
 }
 
-// Auto-refresh every 5 seconds
-setInterval(updateStatus, 5000);
+function updateStatus(connected) {
+    const dot = document.getElementById('status-dot');
+    const text = document.getElementById('status-text');
+    
+    if (connected) {
+        dot.classList.add('connected');
+        dot.classList.remove('disconnected');
+        text.textContent = 'Connected';
+    } else {
+        dot.classList.add('disconnected');
+        dot.classList.remove('connected');
+        text.textContent = 'Disconnected';
+    }
+}
+
+function setupEventListeners() {
+    document.getElementById('btn-copy-last').addEventListener('click', copyLastCode);
+    document.getElementById('btn-copy-all').addEventListener('click', copyAllCode);
+    document.getElementById('btn-export-chat').addEventListener('click', exportChat);
+    document.getElementById('btn-export-md').addEventListener('click', exportMarkdown);
+    document.getElementById('btn-stats').addEventListener('click', showStats);
+    document.getElementById('btn-exports').addEventListener('click', showExports);
+}
+
+async function copyLastCode() {
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        await chrome.tabs.sendMessage(tab.id, { action: 'copyLastResponse' });
+        alert('Last code copied!');
+    } catch (err) {
+        alert('Failed to copy code');
+    }
+}
+
+async function copyAllCode() {
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        await chrome.tabs.sendMessage(tab.id, { action: 'copyAllCode' });
+        alert('All code copied!');
+    } catch (err) {
+        alert('Failed to copy code');
+    }
+}
+
+async function exportChat() {
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        await chrome.tabs.sendMessage(tab.id, { action: 'exportChat' });
+        alert('Chat exported successfully!');
+    } catch (err) {
+        alert('Failed to export chat');
+    }
+}
+
+async function exportMarkdown() {
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        await chrome.tabs.sendMessage(tab.id, { action: 'exportMarkdown' });
+        alert('Markdown exported!');
+    } catch (err) {
+        alert('Failed to export');
+    }
+}
+
+async function showStats() {
+    try {
+        const response = await fetch(`${SERVER_URL}/errors/stats`);
+        const stats = await response.json();
+        
+        if (stats.status === 'success') {
+            let content = `Total Errors: ${stats.total_errors}\n`;
+            content += `Fixed: ${stats.fixed_errors}\n`;
+            content += `Fix Rate: ${stats.fix_rate}%\n\n`;
+            content += `By Type:\n`;
+            
+            Object.entries(stats.by_type || {}).forEach(([type, info]) => {
+                content += `- ${type}: ${info.count} (${info.severity})\n`;
+            });
+            
+            document.getElementById('stats-content').textContent = content;
+            document.getElementById('stats-modal').style.display = 'flex';
+        } else {
+            alert('Failed to load stats');
+        }
+    } catch (err) {
+        alert('Server not connected');
+    }
+}
+
+async function showExports() {
+    try {
+        const response = await fetch(`${SERVER_URL}/exports`);
+        const data = await response.json();
+        
+        if (data.exports && data.exports.length > 0) {
+            let content = `Found ${data.count} export(s)\n\n`;
+            
+            data.exports.slice(0, 5).forEach(exp => {
+                const size = Math.round(exp.size / 1024);
+                content += `${exp.filename}\n`;
+                content += `  ${exp.modified_date} - ${size}KB\n\n`;
+            });
+            
+            document.getElementById('exports-content').textContent = content;
+            document.getElementById('exports-modal').style.display = 'flex';
+        } else {
+            document.getElementById('exports-content').textContent = 'No exports found yet.\n\nExport a chat to see it here!';
+            document.getElementById('exports-modal').style.display = 'flex';
+        }
+    } catch (err) {
+        alert('Server not connected');
+    }
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+}

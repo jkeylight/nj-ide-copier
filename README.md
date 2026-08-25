@@ -17,7 +17,9 @@ nj-ide-copier
 ## Features
 
 - **Code Block Detection** — Auto-detect code in DeepSeek responses
-- **Full Chat Export** — Export entire conversations as Markdown
+- **Full Chat Export (Markdown)** — Export entire conversations as Markdown
+- **Arena.ai Support** — Compatible with Arena.ai chat interface
+- **Browser Extension UI Overhaul (2026 look)** — Modernized extension interface
 - **Version Tracking** — Track every code change with diff history
 - **Error Detection** — Detect and classify errors, suggest fixes
 - **IDE Auto-Detection** — Finds VS Code, JetBrains, Sublime, and more
