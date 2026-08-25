@@ -1,0 +1,14 @@
+pyperclip==1.8.2
+psutil==5.9.5
+websockets==11.0.3
+watchdog==3.0.0
+python-dotenv==1.0.0
+cryptography==41.0.7
+pyjwt==2.8.0
+redis==5.0.1
+sqlalchemy==2.0.23
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.2
+tqdm==4.66.1
+plyer==2.1.0

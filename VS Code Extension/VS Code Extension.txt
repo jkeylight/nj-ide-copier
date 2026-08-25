@@ -1,0 +1,1517 @@
+VS Code Extension - Complete Implementation
+1. Extension Structure
+text
+vscode-extension/
+├── package.json
+├── tsconfig.json
+├── .vscodeignore
+├── README.md
+├── CHANGELOG.md
+├── src/
+│   ├── extension.ts
+│   ├── serverManager.ts
+│   ├── codeInserter.ts
+│   ├── versionViewer.ts
+│   ├── errorTracker.ts
+│   ├── statusBar.ts
+│   ├── webview/
+│   │   ├── dashboard.ts
+│   │   └── versionHistory.ts
+│   └── utils/
+│       ├── httpClient.ts
+│       └── config.ts
+├── media/
+│   ├── icons/
+│   │   ├── icon.png
+│   │   └── icon.svg
+│   └── styles/
+│       └── dashboard.css
+└── test/
+    ├── runTest.ts
+    └── suite/
+        ├── extension.test.ts
+        └── index.ts
+2. package.json - Extension Manifest
+json
+{
+  "name": "nj-ide-copier",
+  "displayName": "NJ IDE Copier",
+  "description": "Intelligent code copier from DeepSeek AI to VS Code",
+  "version": "2.0.0",
+  "publisher": "nj-copier",
+  "license": "MIT",
+  "icon": "media/icons/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nj-ide-copier/vscode-extension"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages",
+    "Snippets"
+  ],
+  "keywords": [
+    "deepseek",
+    "ai",
+    "copier",
+    "code",
+    "ide",
+    "integration"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:nj-ide-copier.start",
+    "onCommand:nj-ide-copier.stop",
+    "onCommand:nj-ide-copier.dashboard",
+    "onCommand:nj-ide-copier.insertCode",
+    "onCommand:nj-ide-copier.showHistory",
+    "onCommand:nj-ide-copier.revertVersion",
+    "onCommand:nj-ide-copier.copyToClipboard",
+    "onCommand:nj-ide-copier.showErrors",
+    "onCommand:nj-ide-copier.configure"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "nj-ide-copier.start",
+        "title": "NJ Copier: Start Server",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.stop",
+        "title": "NJ Copier: Stop Server",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.dashboard",
+        "title": "NJ Copier: Open Dashboard",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.insertCode",
+        "title": "NJ Copier: Insert Last Code",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.showHistory",
+        "title": "NJ Copier: Show Version History",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.revertVersion",
+        "title": "NJ Copier: Revert to Previous Version",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.copyToClipboard",
+        "title": "NJ Copier: Copy Last Code to Clipboard",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.showErrors",
+        "title": "NJ Copier: Show Error Tracker",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.configure",
+        "title": "NJ Copier: Configure Settings",
+        "category": "NJ IDE Copier"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "nj-ide-copier.insertCode",
+        "key": "ctrl+shift+d",
+        "mac": "cmd+shift+d",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "nj-ide-copier.showHistory",
+        "key": "ctrl+shift+h",
+        "mac": "cmd+shift+h"
+      },
+      {
+        "command": "nj-ide-copier.copyToClipboard",
+        "key": "ctrl+shift+c",
+        "mac": "cmd+shift+c",
+        "when": "editorTextFocus"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "nj-ide-copier.insertCode",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "nj-ide-copier.copyToClipboard",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "nj-ide-copier.showHistory",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "nj-ide-copier.insertCode",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "nj-ide-copier.dashboard",
+          "group": "navigation"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "nj-ide-copier",
+          "title": "NJ IDE Copier",
+          "icon": "media/icons/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "nj-ide-copier": [
+        {
+          "id": "nj-ide-copier.codeBlocks",
+          "name": "Code Blocks",
+          "icon": "media/icons/icon.svg",
+          "contextualTitle": "NJ IDE Copier - Code Blocks"
+        },
+        {
+          "id": "nj-ide-copier.versionHistory",
+          "name": "Version History",
+          "icon": "media/icons/icon.svg",
+          "contextualTitle": "NJ IDE Copier - Version History"
+        },
+        {
+          "id": "nj-ide-copier.errorTracker",
+          "name": "Error Tracker",
+          "icon": "media/icons/icon.svg",
+          "contextualTitle": "NJ IDE Copier - Error Tracker"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "nj-ide-copier.codeBlocks",
+        "contents": "No code blocks captured yet.\n[Start Server](command:nj-ide-copier.start)"
+      },
+      {
+        "view": "nj-ide-copier.versionHistory",
+        "contents": "No version history available.\n[Start Server](command:nj-ide-copier.start)"
+      },
+      {
+        "view": "nj-ide-copier.errorTracker",
+        "contents": "No errors tracked yet.\n[Start Server](command:nj-ide-copier.start)"
+      }
+    ],
+    "configuration": {
+      "title": "NJ IDE Copier",
+      "properties": {
+        "nj-ide-copier.serverPort": {
+          "type": "number",
+          "default": 8765,
+          "description": "Port for the local server"
+        },
+        "nj-ide-copier.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-start server when VS Code opens"
+        },
+        "nj-ide-copier.autoInsert": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-insert code at cursor position"
+        },
+        "nj-ide-copier.trackVersions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Track code versions"
+        },
+        "nj-ide-copier.showNotifications": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show desktop notifications"
+        },
+        "nj-ide-copier.defaultLanguage": {
+          "type": "string",
+          "default": "auto",
+          "description": "Default programming language"
+        },
+        "nj-ide-copier.formatOnInsert": {
+          "type": "boolean",
+          "default": true,
+          "description": "Format code on insertion"
+        },
+        "nj-ide-copier.saveLocation": {
+          "type": "string",
+          "default": "~/.nj-ide-copier",
+          "description": "Location to save code files"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.75.0",
+    "@types/node": "^18.x",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0",
+    "@vscode/test-electron": "^2.3.0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "ws": "^8.14.0",
+    "diff": "^5.1.0"
+  }
+}
+3. Main Extension File - src/extension.ts
+typescript
+import * as vscode from 'vscode';
+import { ServerManager } from './serverManager';
+import { CodeInserter } from './codeInserter';
+import { VersionViewer } from './versionViewer';
+import { ErrorTracker } from './errorTracker';
+import { StatusBarManager } from './statusBar';
+import { HttpClient } from './utils/httpClient';
+import { Config } from './utils/config';
+
+let serverManager: ServerManager;
+let codeInserter: CodeInserter;
+let versionViewer: VersionViewer;
+let errorTracker: ErrorTracker;
+let statusBar: StatusBarManager;
+let httpClient: HttpClient;
+let config: Config;
+
+export function activate(context: vscode.ExtensionContext) {
+    console.log('NJ IDE Copier extension is now active');
+
+    // Initialize components
+    config = new Config();
+    httpClient = new HttpClient(config.getServerPort());
+    serverManager = new ServerManager(context, httpClient);
+    codeInserter = new CodeInserter(httpClient);
+    versionViewer = new VersionViewer(context, httpClient);
+    errorTracker = new ErrorTracker(context, httpClient);
+    statusBar = new StatusBarManager();
+
+    // Register commands
+    registerCommands(context);
+
+    // Auto-start server if configured
+    if (config.shouldAutoStart()) {
+        serverManager.startServer();
+    }
+
+    // Register views
+    registerViews(context);
+
+    // Show welcome message
+    vscode.window.showInformationMessage('NJ IDE Copier is ready!');
+}
+
+function registerCommands(context: vscode.ExtensionContext) {
+    // Start server
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nj-ide-copier.start', async () => {
+            await serverManager.startServer();
+        })
+    );
+
+    // Stop server
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nj-ide-copier.stop', async () => {
+            await serverManager.stopServer();
+        })
+    );
+
+    // Open dashboard
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nj-ide-copier.dashboard', () => {
+            DashboardPanel.createOrShow(context.extensionUri, httpClient);
+        })
+    );
+
+    // Insert code
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nj-ide-copier.insertCode', async () => {
+            await codeInserter.insertLastCode();
+        })
+    );
+
+    // Show history
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nj-ide-copier.showHistory', async () => {
+            await versionViewer.showHistory();
+        })
+    );
+
+    // Revert version
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nj-ide-copier.revertVersion', async () => {
+            await versionViewer.revertVersion();
+        })
+    );
+
+    // Copy to clipboard
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nj-ide-copier.copyToClipboard', async () => {
+            await codeInserter.copyToClipboard();
+        })
+    );
+
+    // Show errors
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nj-ide-copier.showErrors', async () => {
+            await errorTracker.showErrorTracker();
+        })
+    );
+
+    // Configure
+    context.subscriptions.push(
+        vscode.commands.registerCommand('nj-ide-copier.configure', async () => {
+            await vscode.commands.executeCommand(
+                'workbench.action.openSettings',
+                'nj-ide-copier'
+            );
+        })
+    );
+}
+
+function registerViews(context: vscode.ExtensionContext) {
+    // Code blocks view
+    const codeBlocksProvider = new CodeBlocksProvider(httpClient);
+    vscode.window.registerTreeDataProvider(
+        'nj-ide-copier.codeBlocks',
+        codeBlocksProvider
+    );
+
+    // Version history view
+    const versionHistoryProvider = new VersionHistoryProvider(httpClient);
+    vscode.window.registerTreeDataProvider(
+        'nj-ide-copier.versionHistory',
+        versionHistoryProvider
+    );
+
+    // Error tracker view
+    const errorTrackerProvider = new ErrorTrackerProvider(httpClient);
+    vscode.window.registerTreeDataProvider(
+        'nj-ide-copier.errorTracker',
+        errorTrackerProvider
+    );
+}
+
+export function deactivate() {
+    if (serverManager) {
+        serverManager.stopServer();
+    }
+}
+4. Server Manager - src/serverManager.ts
+typescript
+import * as vscode from 'vscode';
+import { HttpClient } from './utils/httpClient';
+import { ChildProcess, spawn } from 'child_process';
+import * as path from 'path';
+import * as fs from 'fs';
+
+export class ServerManager {
+    private serverProcess: ChildProcess | null = null;
+    private statusBarItem: vscode.StatusBarItem;
+
+    constructor(
+        private context: vscode.ExtensionContext,
+        private httpClient: HttpClient
+    ) {
+        this.statusBarItem = vscode.window.createStatusBarItem(
+            vscode.StatusBarAlignment.Right,
+            100
+        );
+        this.statusBarItem.command = 'nj-ide-copier.dashboard';
+        this.updateStatusBar(false);
+        this.statusBarItem.show();
+    }
+
+    async startServer(): Promise<void> {
+        if (this.serverProcess) {
+            vscode.window.showInformationMessage('NJ Copier server is already running');
+            return;
+        }
+
+        try {
+            // Check if server is already running
+            const isRunning = await this.httpClient.checkHealth();
+            if (isRunning) {
+                vscode.window.showInformationMessage('NJ Copier server detected on port');
+                this.updateStatusBar(true);
+                return;
+            }
+
+            // Start Python server
+            const pythonScript = this.getPythonScriptPath();
+            
+            if (!fs.existsSync(pythonScript)) {
+                vscode.window.showErrorMessage(
+                    'NJ Copier server script not found. Please install the Python package.'
+                );
+                return;
+            }
+
+            this.serverProcess = spawn('python', [pythonScript], {
+                detached: false,
+                stdio: 'pipe'
+            });
+
+            this.serverProcess.stdout?.on('data', (data) => {
+                console.log(`NJ Copier Server: ${data}`);
+            });
+
+            this.serverProcess.stderr?.on('data', (data) => {
+                console.error(`NJ Copier Server Error: ${data}`);
+            });
+
+            this.serverProcess.on('error', (error) => {
+                vscode.window.showErrorMessage(`Failed to start server: ${error.message}`);
+                this.serverProcess = null;
+                this.updateStatusBar(false);
+            });
+
+            this.serverProcess.on('exit', (code) => {
+                console.log(`NJ Copier server exited with code ${code}`);
+                this.serverProcess = null;
+                this.updateStatusBar(false);
+            });
+
+            // Wait for server to start
+            await this.waitForServer();
+            
+            vscode.window.showInformationMessage('NJ Copier server started successfully');
+            this.updateStatusBar(true);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to start server: ${error}`);
+        }
+    }
+
+    async stopServer(): Promise<void> {
+        if (this.serverProcess) {
+            this.serverProcess.kill();
+            this.serverProcess = null;
+            this.updateStatusBar(false);
+            vscode.window.showInformationMessage('NJ Copier server stopped');
+        } else {
+            vscode.window.showInformationMessage('NJ Copier server is not running');
+        }
+    }
+
+    private getPythonScriptPath(): string {
+        // Look for the server script in common locations
+        const possiblePaths = [
+            path.join(this.context.extensionPath, 'python', 'server.py'),
+            path.join(process.env.HOME || '', '.nj-ide-copier', 'server.py'),
+            '/usr/local/bin/nj-ide-copier-server'
+        ];
+
+        for (const filePath of possiblePaths) {
+            if (fs.existsSync(filePath)) {
+                return filePath;
+            }
+        }
+
+        return possiblePaths[0];
+    }
+
+    private async waitForServer(timeout: number = 10000): Promise<void> {
+        const startTime = Date.now();
+        
+        while (Date.now() - startTime < timeout) {
+            try {
+                const isRunning = await this.httpClient.checkHealth();
+                if (isRunning) {
+                    return;
+                }
+            } catch (error) {
+                // Server not ready yet
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
+        throw new Error('Server startup timeout');
+    }
+
+    private updateStatusBar(isRunning: boolean) {
+        if (isRunning) {
+            this.statusBarItem.text = '$(radio-tower) NJ Copier';
+            this.statusBarItem.tooltip = 'NJ IDE Copier server is running';
+            this.statusBarItem.backgroundColor = undefined;
+        } else {
+            this.statusBarItem.text = '$(stop) NJ Copier';
+            this.statusBarItem.tooltip = 'NJ IDE Copier server is stopped';
+            this.statusBarItem.backgroundColor = new vscode.ThemeColor(
+                'statusBarItem.warningBackground'
+            );
+        }
+    }
+}
+5. Code Inserter - src/codeInserter.ts
+typescript
+import * as vscode from 'vscode';
+import { HttpClient } from './utils/httpClient';
+import { Config } from './utils/config';
+
+export class CodeInserter {
+    constructor(
+        private httpClient: HttpClient,
+        private config: Config = new Config()
+    ) {}
+
+    async insertLastCode(): Promise<void> {
+        const editor = vscode.window.activeTextEditor;
+        
+        if (!editor) {
+            vscode.window.showWarningMessage('No active editor found');
+            return;
+        }
+
+        try {
+            // Get last code from server
+            const response = await this.httpClient.get('/code/last');
+            
+            if (response && response.code) {
+                const code = response.code;
+                const language = response.language || 'text';
+                
+                // Format code if configured
+                let formattedCode = code;
+                if (this.config.shouldFormatOnInsert()) {
+                    formattedCode = await this.formatCode(code, language);
+                }
+                
+                // Insert at cursor
+                const position = editor.selection.active;
+                
+                await editor.edit((editBuilder) => {
+                    editBuilder.insert(position, formattedCode);
+                });
+                
+                // Show notification
+                if (this.config.shouldShowNotifications()) {
+                    vscode.window.showInformationMessage(
+                        `Code inserted from NJ Copier (${language})`
+                    );
+                }
+            } else {
+                vscode.window.showWarningMessage('No code available to insert');
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to insert code: ${error}`);
+        }
+    }
+
+    async copyToClipboard(): Promise<void> {
+        try {
+            const response = await this.httpClient.get('/code/last');
+            
+            if (response && response.code) {
+                await vscode.env.clipboard.writeText(response.code);
+                vscode.window.showInformationMessage('Code copied to clipboard');
+            } else {
+                vscode.window.showWarningMessage('No code available to copy');
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to copy code: ${error}`);
+        }
+    }
+
+    private async formatCode(code: string, language: string): Promise<string> {
+        try {
+            // Try to use VS Code's built-in formatter
+            const document = await vscode.workspace.openTextDocument({
+                content: code,
+                language: language
+            });
+            
+            const edits = await vscode.commands.executeCommand<vscode.TextEdit[]>(
+                'vscode.executeFormatDocumentProvider',
+                document.uri
+            );
+            
+            if (edits && edits.length > 0) {
+                return document.getText();
+            }
+        } catch (error) {
+            console.log('Formatting failed, using original code');
+        }
+        
+        return code;
+    }
+}
+6. Version Viewer - src/versionViewer.ts
+typescript
+import * as vscode from 'vscode';
+import { HttpClient } from './utils/httpClient';
+
+export class VersionViewer {
+    constructor(
+        private context: vscode.ExtensionContext,
+        private httpClient: HttpClient
+    ) {}
+
+    async showHistory(): Promise<void> {
+        try {
+            const response = await this.httpClient.get('/versions');
+            
+            if (response && response.blocks) {
+                const panel = vscode.window.createWebviewPanel(
+                    'njIdeCopierHistory',
+                    'NJ Copier - Version History',
+                    vscode.ViewColumn.One,
+                    {
+                        enableScripts: true,
+                        retainContextWhenHidden: true
+                    }
+                );
+                
+                panel.webview.html = this.generateHistoryHtml(response.blocks);
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to load history: ${error}`);
+        }
+    }
+
+    async revertVersion(): Promise<void> {
+        try {
+            const response = await this.httpClient.get('/versions');
+            
+            if (!response || !response.blocks || response.blocks.length === 0) {
+                vscode.window.showWarningMessage('No versions available to revert');
+                return;
+            }
+            
+            // Show block selection
+            const blocks = response.blocks.map((block: any, index: number) => ({
+                label: `${block.language} - Block ${index + 1}`,
+                description: `${block.versions.length} versions`,
+                block: block
+            }));
+            
+            const selectedBlock = await vscode.window.showQuickPick(blocks, {
+                placeHolder: 'Select code block to revert'
+            });
+            
+            if (!selectedBlock) {
+                return;
+            }
+            
+            // Show version selection
+            const versions = selectedBlock.block.versions.map((version: any) => ({
+                label: `Version ${version.version_id}`,
+                description: version.status,
+                detail: version.change_summary || 'No changes',
+                version: version
+            }));
+            
+            const selectedVersion = await vscode.window.showQuickPick(versions, {
+                placeHolder: 'Select version to revert to'
+            });
+            
+            if (!selectedVersion) {
+                return;
+            }
+            
+            // Confirm revert
+            const confirmation = await vscode.window.showWarningMessage(
+                `Revert to version ${selectedVersion.version.version_id}?`,
+                { modal: true },
+                'Yes',
+                'No'
+            );
+            
+            if (confirmation !== 'Yes') {
+                return;
+            }
+            
+            // Perform revert
+            const revertResponse = await this.httpClient.post('/version/revert', {
+                block_id: selectedBlock.block.block_id,
+                version_id: selectedVersion.version.version_id
+            });
+            
+            if (revertResponse.status === 'success') {
+                vscode.window.showInformationMessage(
+                    `Reverted to version ${selectedVersion.version.version_id}`
+                );
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to revert version: ${error}`);
+        }
+    }
+
+    private generateHistoryHtml(blocks: any[]): string {
+        const blockHtml = blocks.map((block, index) => {
+            const versionsHtml = block.versions.map((version: any, vIndex: number) => {
+                const statusClass = this.getStatusClass(version.status);
+                const isCurrent = vIndex === block.versions.length - 1;
+                
+                return `
+                    <div class="version-item ${statusClass} ${isCurrent ? 'current' : ''}">
+                        <div class="version-header">
+                            <span class="version-id">${version.version_id}</span>
+                            <span class="status-badge ${statusClass}">${version.status}</span>
+                            ${isCurrent ? '<span class="current-badge">Current</span>' : ''}
+                        </div>
+                        <div class="version-meta">
+                            ${version.change_summary ? `<p>${version.change_summary}</p>` : ''}
+                            ${version.error_info ? `<p class="error-info">⚠️ ${version.error_info.message}</p>` : ''}
+                        </div>
+                        <pre class="code-preview"><code>${this.escapeHtml(version.code.substring(0, 500))}${version.code.length > 500 ? '...' : ''}</code></pre>
+                    </div>
+                `;
+            }).join('');
+            
+            return `
+                <div class="block-section">
+                    <h3>${block.language} - Block ${index + 1}</h3>
+                    <p class="block-info">Block ID: ${block.block_id} | Updated: ${new Date(block.updated_at * 1000).toLocaleString()}</p>
+                    <div class="versions-list">
+                        ${versionsHtml}
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        return `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        padding: 20px;
+                        background: #f5f5f5;
+                        color: #333;
+                    }
+                    
+                    .block-section {
+                        background: white;
+                        border-radius: 8px;
+                        padding: 20px;
+                        margin-bottom: 20px;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                    }
+                    
+                    .block-section h3 {
+                        margin: 0 0 10px 0;
+                        color: #2196F3;
+                    }
+                    
+                    .block-info {
+                        color: #666;
+                        font-size: 12px;
+                        margin-bottom: 15px;
+                    }
+                    
+                    .versions-list {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 10px;
+                    }
+                    
+                    .version-item {
+                        border: 1px solid #e0e0e0;
+                        border-radius: 6px;
+                        padding: 10px;
+                        transition: all 0.3s;
+                    }
+                    
+                    .version-item:hover {
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                    }
+                    
+                    .version-item.error {
+                        border-left: 4px solid #f44336;
+                    }
+                    
+                    .version-item.fixed {
+                        border-left: 4px solid #4CAF50;
+                    }
+                    
+                    .version-item.optimized {
+                        border-left: 4px solid #2196F3;
+                    }
+                    
+                    .version-item.current {
+                        background: #f5f5f5;
+                        border: 2px solid #2196F3;
+                    }
+                    
+                    .version-header {
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                        margin-bottom: 5px;
+                    }
+                    
+                    .version-id {
+                        font-weight: bold;
+                        color: #333;
+                    }
+                    
+                    .status-badge {
+                        padding: 2px 8px;
+                        border-radius: 12px;
+                        font-size: 11px;
+                        text-transform: uppercase;
+                    }
+                    
+                    .status-badge.error {
+                        background: #ffebee;
+                        color: #c62828;
+                    }
+                    
+                    .status-badge.fixed {
+                        background: #e8f5e9;
+                        color: #2e7d32;
+                    }
+                    
+                    .status-badge.optimized {
+                        background: #e3f2fd;
+                        color: #1565c0;
+                    }
+                    
+                    .current-badge {
+                        background: #2196F3;
+                        color: white;
+                        padding: 2px 8px;
+                        border-radius: 12px;
+                        font-size: 11px;
+                    }
+                    
+                    .version-meta {
+                        color: #666;
+                        font-size: 12px;
+                        margin-bottom: 10px;
+                    }
+                    
+                    .error-info {
+                        color: #f44336;
+                        margin: 5px 0;
+                    }
+                    
+                    .code-preview {
+                        background: #f8f9fa;
+                        border: 1px solid #e0e0e0;
+                        border-radius: 4px;
+                        padding: 10px;
+                        font-family: 'Monaco', 'Menlo', monospace;
+                        font-size: 12px;
+                        overflow-x: auto;
+                        white-space: pre-wrap;
+                    }
+                </style>
+            </head>
+            <body>
+                <h2>Version History</h2>
+                ${blockHtml}
+            </body>
+            </html>
+        `;
+    }
+
+    private getStatusClass(status: string): string {
+        switch (status.toLowerCase()) {
+            case 'error':
+                return 'error';
+            case 'fixed':
+                return 'fixed';
+            case 'optimized':
+                return 'optimized';
+            default:
+                return '';
+        }
+    }
+
+    private escapeHtml(text: string): string {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+}
+7. HTTP Client - src/utils/httpClient.ts
+typescript
+import axios, { AxiosInstance } from 'axios';
+
+export class HttpClient {
+    private client: AxiosInstance;
+    
+    constructor(private port: number = 8765) {
+        this.client = axios.create({
+            baseURL: `http://localhost:${port}`,
+            timeout: 5000,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            }
+        });
+    }
+
+    async checkHealth(): Promise<boolean> {
+        try {
+            const response = await this.client.get('/status');
+            return response.status === 200;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    async get(path: string, params?: any): Promise<any> {
+        try {
+            const response = await this.client.get(path, { params });
+            return response.data;
+        } catch (error) {
+            console.error(`GET ${path} failed:`, error);
+            throw error;
+        }
+    }
+
+    async post(path: string, data?: any): Promise<any> {
+        try {
+            const response = await this.client.post(path, data);
+            return response.data;
+        } catch (error) {
+            console.error(`POST ${path} failed:`, error);
+            throw error;
+        }
+    }
+
+    async put(path: string, data?: any): Promise<any> {
+        try {
+            const response = await this.client.put(path, data);
+            return response.data;
+        } catch (error) {
+            console.error(`PUT ${path} failed:`, error);
+            throw error;
+        }
+    }
+
+    async delete(path: string): Promise<any> {
+        try {
+            const response = await this.client.delete(path);
+            return response.data;
+        } catch (error) {
+            console.error(`DELETE ${path} failed:`, error);
+            throw error;
+        }
+    }
+}
+8. Configuration - src/utils/config.ts
+typescript
+import * as vscode from 'vscode';
+
+export class Config {
+    private config = vscode.workspace.getConfiguration('nj-ide-copier');
+
+    getServerPort(): number {
+        return this.config.get('serverPort', 8765);
+    }
+
+    shouldAutoStart(): boolean {
+        return this.config.get('autoStart', true);
+    }
+
+    shouldAutoInsert(): boolean {
+        return this.config.get('autoInsert', true);
+    }
+
+    shouldTrackVersions(): boolean {
+        return this.config.get('trackVersions', true);
+    }
+
+    shouldShowNotifications(): boolean {
+        return this.config.get('showNotifications', true);
+    }
+
+    shouldFormatOnInsert(): boolean {
+        return this.config.get('formatOnInsert', true);
+    }
+
+    getDefaultLanguage(): string {
+        return this.config.get('defaultLanguage', 'auto');
+    }
+
+    getSaveLocation(): string {
+        return this.config.get('saveLocation', '~/.nj-ide-copier');
+    }
+}
+9. README.md
+markdown
+# NJ IDE Copier - VS Code Extension
+
+Intelligent code copier that seamlessly transfers code from DeepSeek AI to VS Code.
+
+## Features
+
+- 🚀 **Automatic Code Insertion**: Insert code at cursor position
+- 📚 **Version Tracking**: Track all code versions
+- ⚠️ **Error Detection**: Detect and track errors
+- 🎨 **Code Formatting**: Auto-format code on insertion
+- 📊 **Dashboard**: View code blocks and history
+- 🔄 **Version Rollback**: Revert to previous versions
+- 📋 **Clipboard Integration**: Copy code to clipboard
+
+## Installation
+
+1. Install from VS Code Marketplace
+2. Or install manually:
+   ```bash
+   code --install-extension nj-ide-copier-2.0.0.vsix
+Usage
+Commands
+NJ Copier: Start Server - Start the local server
+
+NJ Copier: Insert Last Code - Insert last code at cursor
+
+NJ Copier: Show Version History - View version history
+
+NJ Copier: Revert to Previous Version - Rollback code
+
+NJ Copier: Copy Last Code to Clipboard - Copy code
+
+NJ Copier: Open Dashboard - Open dashboard
+
+NJ Copier: Show Error Tracker - View errors
+
+NJ Copier: Configure Settings - Open settings
+
+Keyboard Shortcuts
+Ctrl+Shift+D / Cmd+Shift+D - Insert code
+
+Ctrl+Shift+H / Cmd+Shift+H - Show history
+
+Ctrl+Shift+C / Cmd+Shift+C - Copy to clipboard
+
+Configuration
+json
+{
+  "nj-ide-copier.serverPort": 8765,
+  "nj-ide-copier.autoStart": true,
+  "nj-ide-copier.autoInsert": true,
+  "nj-ide-copier.trackVersions": true,
+  "nj-ide-copier.showNotifications": true,
+  "nj-ide-copier.formatOnInsert": true
+}
+Requirements
+VS Code 1.75.0 or higher
+
+Python 3.9+ installed
+
+NJ IDE Copier server running
+
+Development
+bash
+# Clone repository
+git clone https://github.com/nj-ide-copier/vscode-extension.git
+
+# Install dependencies
+npm install
+
+# Compile
+npm run compile
+
+# Package
+npm run package
+License
+MIT
+
+text
+
+### 10. Building the Extension
+
+Create a script to build and package the extension:
+
+```bash
+#!/bin/bash
+# build-extension.sh
+
+echo "Building NJ IDE Copier VS Code Extension..."
+
+# Install dependencies
+npm install
+
+# Compile TypeScript
+npm run compile
+
+# Run tests
+npm test
+
+# Package extension
+npm run package
+
+echo "Extension packaged successfully!"
+echo "Output: nj-ide-copier-2.0.0.vsix"
+Save all these files in the vscode-extension/ folder. To build:
+
+Run npm install to install dependencies
+
+Run npm run compile to compile TypeScript
+
+Run npm run package to create the .vsix file
+
+Install the .vsix file in VS Code
+
+The VS Code extension provides complete integration with the NJ IDE Copier system, including real-time code insertion, version tracking, error detection, and a comprehensive dashboard interface.
+
+how will this work
+Let me explain how the NJ IDE Copier system works end-to-end with a detailed flow explanation:
+
+🔄 Complete System Workflow
+1. System Components & Their Roles
+text
+┌─────────────────────────────────────────────────────────────────┐
+│                     DEEPSEEK CHAT (Browser)                      │
+│                                                                   │
+│  User asks DeepSeek for code                                    │
+│  DeepSeek generates response with code blocks                    │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │         BROWSER EXTENSION (Content Script)              │   │
+│  │                                                          │   │
+│  │  • Watches for code blocks in chat                      │   │
+│  │  • Adds "Copy to IDE" buttons                           │   │
+│  │  • Detects code language                                │   │
+│  │  • Captures full chat content                           │   │
+│  │  • Detects errors in responses                          │   │
+│  │  • Tracks versions locally                              │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ HTTP POST /code/update
+                              │ (or WebSocket for real-time)
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  LOCAL PYTHON SERVER (Port 8765)                 │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │              REQUEST HANDLER                            │   │
+│  │  • Receives code from browser extension                 │   │
+│  │  • Validates and processes data                         │   │
+│  │  • Routes to appropriate modules                        │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │            VERSION MANAGER                              │   │
+│  │  • Creates/updates code versions                        │   │
+│  │  • Detects changes between versions                     │   │
+│  │  • Maintains version history                            │   │
+│  │  • Identifies error fixes                               │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │             ERROR TRACKER                               │   │
+│  │  • Classifies error types                               │   │
+│  │  • Tracks error patterns                                │   │
+│  │  • Suggests fixes                                       │   │
+│  │  • Maintains error history                              │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │            IDE DETECTOR                                 │   │
+│  │  • Detects installed IDEs                              │   │
+│  │  • Identifies active IDE                                │   │
+│  │  • Manages IDE connections                              │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │            STORAGE LAYER                                │   │
+│  │  • SQLite Database (metadata)                           │   │
+│  │  • File System (code files)                             │   │
+│  │  • Version History                                      │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ IDE-specific APIs
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    VS CODE EXTENSION                             │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │            SERVER MANAGER                               │   │
+│  │  • Connects to local server                            │   │
+│  │  • Manages server lifecycle                            │   │
+│  │  • Shows status in status bar                           │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │            CODE INSERTER                                │   │
+│  │  • Inserts code at cursor                               │   │
+│  │  • Formats code automatically                           │   │
+│  │  • Handles language detection                           │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │            VERSION VIEWER                               │   │
+│  │  • Shows version history                                │   │
+│  │  • Enables version comparison                           │   │
+│  │  • Allows rollback                                      │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │            ERROR TRACKER UI                             │   │
+│  │  • Displays error statistics                            │   │
+│  │  • Shows fix suggestions                                │   │
+│  │  • Tracks error patterns                                │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+2. Step-by-Step Usage Flow
+Scenario 1: Basic Code Copy
+Scenario 2: Error Fix Flow
+3. Real-World Example
+Step 1: User Opens DeepSeek Chat
+text
+User types: "Write a Python function to sort a list of dictionaries by age"
+Step 2: DeepSeek Responds
+python
+def sort_by_age(people):
+    """Sort list of dictionaries by age"""
+    return sorted(people, key=lambda x: x['age'])
+
+# Example usage
+people = [
+    {'name': 'Alice', 'age': 30},
+    {'name': 'Bob', 'age': 25},
+    {'name': 'Charlie', 'age': 35}
+]
+
+sorted_people = sort_by_age(people)
+print(sorted_people)
+Step 3: Browser Extension Detects Code
+Code block detected (language: Python)
+
+"📋 Copy to IDE" button appears on code block
+
+Extension adds floating buttons for full chat copy
+
+Step 4: User Clicks Copy Button
+Extension sends HTTP POST to localhost:8765/code/update
+
+Payload includes:
+
+json
+{
+  "code": "def sort_by_age(people):...",
+  "language": "python",
+  "context": {
+    "message_id": "msg_123",
+    "role": "assistant",
+    "content": "Write a Python function..."
+  }
+}
+Step 5: Server Processes Request
+Version Manager:
+
+Creates new code block with ID block_abc123
+
+Saves as version v1
+
+Status: original
+
+Calculates hash for future identification
+
+Error Tracker:
+
+Scans code for potential errors
+
+No errors found in this case
+
+Logs successful code
+
+IDE Detector:
+
+Detects VS Code is running
+
+Identifies it as target IDE
+
+Step 6: Code Appears in VS Code
+VS Code extension receives code
+
+Inserts at current cursor position
+
+Shows notification: "✅ Code inserted from NJ Copier (python)"
+
+4. Error Handling Flow
+When Code Has Errors:
+Initial Code (v1)
+
+python
+def divide_numbers(a, b):
+    return a / b  # Missing zero check
+
+result = divide_numbers(10, 0)
+Server Detects Potential Issues
+
+Scans for common error patterns
+
+Identifies possible ZeroDivisionError
+
+Marks version as potentially problematic
+
+Shows warning icon
+
+User Asks DeepSeek to Fix
+
+text
+User: "This will crash with division by zero"
+DeepSeek Provides Fixed Code (v2)
+
+python
+def divide_numbers(a, b):
+    if b == 0:
+        raise ValueError("Cannot divide by zero")
+    return a / b
+
+result = divide_numbers(10, 2)
+Version Manager Processes Update
+
+Detects code is similar (85% similarity)
+
+Identifies as same code block
+
+Creates version v2
+
+Status: fixed
+
+Links v1 and v2 as parent-child
+
+Generates diff:
+
+text
++ if b == 0:
++     raise ValueError("Cannot divide by zero")
+VS Code Updates
+
+Old code replaced with fixed version
+
+Version history updated
+
+Fix summary shown
+
+5. Multi-IDE Scenario
+text
+User has: VS Code, PyCharm, and Sublime Text installed
+
+1. Server detects all three IDEs
+2. User is currently working in PyCharm
+3. IDE Detector identifies PyCharm as active
+4. Code automatically goes to PyCharm
+
+If user switches to VS Code:
+1. IDE Detector notices change
+2. Next code copy goes to VS Code
+3. Status bar updates to show new target
+6. Real-Time Data Flow
+text
+Browser Extension (Content Script)
+    ↓ Watches for changes
+    ↓ MutationObserver detects new code blocks
+    ↓ Extracts code and context
+    ↓ Sends to server (HTTP or WebSocket)
+    
+Local Server
+    ↓ Receives request
+    ↓ Validates data
+    ↓ Checks for existing code blocks (similarity matching)
+    ↓ Creates/updates version
+    ↓ Detects errors
+    ↓ Identifies target IDE
+    ↓ Saves to storage
+    ↓ Notifies IDE extension
+    
+VS Code Extension
+    ↓ Receives notification
+    ↓ Gets code from server
+    ↓ Formats code if needed
+    ↓ Inserts at cursor
+    ↓ Updates status bar
+    ↓ Shows notification
+7. Data Persistence
+text
+~/.nj-ide-copier/
+├── config.json          # User preferences
+├── database.sqlite      # Metadata & versions
+├── versions/            # Version history
+│   ├── block_abc123/
+│   │   ├── v1.py
+│   │   ├── v2.py
+│   │   └── v3.py
+│   └── block_def456/
+│       └── v1.js
+├── projects/            # Organized code
+│   ├── project_1/
+│   │   └── main.py
+│   └── project_2/
+│       └── index.js
+└── logs/               # System logs
+    └── server.log
+8. User Interactions Summary
+Action	How It Works	What User Sees
+Copy Single Code	Click button on code block	Code appears in IDE
+Copy Full Chat	Click floating button	Markdown file opens in IDE
+Copy All Code	Click "Copy All Code"	All code blocks saved as files
+View History	Open dashboard or command	Version timeline with diffs
+Revert Version	Select version in history	Code rolls back
+Track Errors	Automatic detection	Error badges and suggestions
+Switch IDE	Change config or auto-detect	Code goes to new IDE
+9. The Magic Parts
+Code Similarity Detection: Uses difflib to match similar code even after modifications
+
+Smart Versioning: Understands if new code is an update, fix, or new code
+
+Auto-Detection: Figures out which IDE you're using without configuration
+
+Error Intelligence: Learns from error patterns to provide better suggestions
+
+Context Awareness: Associates code with conversation context
+
+10. What Makes It "Just Work"
+Zero Configuration: Works out of the box
+
+Real-time: Code appears in IDE instantly
+
+Intelligent: Understands code context and relationships
+
+Non-intrusive: Works in background without disrupting workflow
+
+Complete History: Never lose code versions
+
+Multi-IDE: Switch between IDEs seamlessly
+
+Error Detection: Catches issues before they become problems
+
+The system creates a seamless bridge between AI chat and your development environment, making it feel like DeepSeek is directly integrated into your IDE.
+

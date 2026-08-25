@@ -1,0 +1,160 @@
+{
+  "name": "nj-ide-copier",
+  "displayName": "NJ IDE Copier",
+  "description": "Intelligent code copier from DeepSeek AI to VS Code",
+  "version": "2.0.0",
+  "publisher": "nj-copier",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages",
+    "Snippets"
+  ],
+  "keywords": [
+    "deepseek",
+    "ai",
+    "copier",
+    "code",
+    "ide",
+    "integration"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "nj-ide-copier.start",
+        "title": "NJ Copier: Start Server",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.stop",
+        "title": "NJ Copier: Stop Server",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.dashboard",
+        "title": "NJ Copier: Open Dashboard",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.insertCode",
+        "title": "NJ Copier: Insert Last Code",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.showHistory",
+        "title": "NJ Copier: Show Version History",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.revertVersion",
+        "title": "NJ Copier: Revert to Previous Version",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.copyToClipboard",
+        "title": "NJ Copier: Copy Last Code to Clipboard",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.showErrors",
+        "title": "NJ Copier: Show Error Tracker",
+        "category": "NJ IDE Copier"
+      },
+      {
+        "command": "nj-ide-copier.configure",
+        "title": "NJ Copier: Configure Settings",
+        "category": "NJ IDE Copier"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "nj-ide-copier.insertCode",
+        "key": "ctrl+shift+d",
+        "mac": "cmd+shift+d",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "nj-ide-copier.showHistory",
+        "key": "ctrl+shift+h",
+        "mac": "cmd+shift+h"
+      },
+      {
+        "command": "nj-ide-copier.copyToClipboard",
+        "key": "ctrl+shift+c",
+        "mac": "cmd+shift+c",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "NJ IDE Copier",
+      "properties": {
+        "nj-ide-copier.serverPort": {
+          "type": "number",
+          "default": 8765,
+          "description": "Port for the local server"
+        },
+        "nj-ide-copier.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-start server when VS Code opens"
+        },
+        "nj-ide-copier.autoInsert": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-insert code at cursor position"
+        },
+        "nj-ide-copier.trackVersions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Track code versions"
+        },
+        "nj-ide-copier.showNotifications": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show desktop notifications"
+        },
+        "nj-ide-copier.defaultLanguage": {
+          "type": "string",
+          "default": "auto",
+          "description": "Default programming language"
+        },
+        "nj-ide-copier.formatOnInsert": {
+          "type": "boolean",
+          "default": true,
+          "description": "Format code on insertion"
+        },
+        "nj-ide-copier.saveLocation": {
+          "type": "string",
+          "default": "~/.nj-ide-copier",
+          "description": "Location to save code files"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.75.0",
+    "@types/node": "^18.x",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0",
+    "@vscode/vsce": "^2.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  }
+}

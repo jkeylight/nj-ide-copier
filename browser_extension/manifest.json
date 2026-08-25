@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "NJ IDE Copier",
+  "version": "2.1.0",
+  "description": "Copy code from any AI chat (ChatGPT, Claude, DeepSeek, Qwen, Kimi, MiMo, Gemini, etc.) directly to your IDE",
+  "permissions": [
+    "clipboardWrite",
+    "storage",
+    "activeTab",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://localhost:8765/*",
+    "*://chat.openai.com/*",
+    "*://chatgpt.com/*",
+    "*://claude.ai/*",
+    "*://chat.deepseek.com/*",
+    "*://tongyi.aliyun.com/*",
+    "*://qianwen.aliyun.com/*",
+    "*://chatglm.cn/*",
+    "*://kimi.moonshot.cn/*",
+    "*://gemini.google.com/*",
+    "*://huggingface.co/chat/*",
+    "*://poe.com/*",
+    "*://you.com/*",
+    "*://perplexity.ai/*"
+  ],
+  "content_scripts": [{
+    "matches": [
+      "*://chat.openai.com/*",
+      "*://chatgpt.com/*",
+      "*://claude.ai/*",
+      "*://chat.deepseek.com/*",
+      "*://tongyi.aliyun.com/*",
+      "*://qianwen.aliyun.com/*",
+      "*://chatglm.cn/*",
+      "*://kimi.moonshot.cn/*",
+      "*://gemini.google.com/*",
+      "*://huggingface.co/chat/*",
+      "*://poe.com/*",
+      "*://you.com/*",
+      "*://perplexity.ai/*"
+    ],
+    "js": ["content.js"],
+    "css": ["styles.css"],
+    "run_at": "document_idle"
+  }],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

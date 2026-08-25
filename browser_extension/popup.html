@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { width: 380px; padding: 15px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .header { text-align: center; margin-bottom: 16px; }
+        .header h2 { margin: 0; color: #333; font-size: 18px; }
+        .header p { margin: 4px 0 0; color: #666; font-size: 12px; }
+        .status { background: #f0f0f0; border-radius: 8px; padding: 10px; margin-bottom: 12px; }
+        .status-item { display: flex; justify-content: space-between; margin: 4px 0; font-size: 13px; }
+        .status-label { font-weight: 600; color: #555; }
+        .status-value { color: #2196F3; }
+        .platforms { background: #e8f5e9; border-radius: 8px; padding: 10px; margin-bottom: 12px; }
+        .platforms h4 { margin: 0 0 6px; font-size: 13px; color: #2e7d32; }
+        .platform-list { display: flex; flex-wrap: wrap; gap: 4px; }
+        .platform-tag { background: white; padding: 2px 8px; border-radius: 10px; font-size: 11px; color: #333; border: 1px solid #c8e6c9; }
+        .actions { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+        button { padding: 10px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
+        button:hover { transform: scale(1.02); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+        .primary-btn { background: #2196F3; color: white; }
+        .secondary-btn { background: #f0f0f0; color: #333; }
+        .success-btn { background: #4CAF50; color: white; }
+        .settings { padding-top: 12px; border-top: 1px solid #e0e0e0; }
+        select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-top: 4px; font-size: 13px; }
+        label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2><span style="font-size:20px">&#128640;</span> NJ IDE Copier</h2>
+        <p>Works with all AI chat platforms</p>
+    </div>
+
+    <div class="status" id="status">
+        <div class="status-item">
+            <span class="status-label">Server:</span>
+            <span class="status-value" id="serverStatus">Checking...</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">Platform:</span>
+            <span class="status-value" id="currentPlatform">Detecting...</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">Active IDE:</span>
+            <span class="status-value" id="activeIDE">Detecting...</span>
+        </div>
+    </div>
+
+    <div class="platforms">
+        <h4>&#10004; Supported Platforms</h4>
+        <div class="platform-list">
+            <span class="platform-tag">ChatGPT</span>
+            <span class="platform-tag">Claude</span>
+            <span class="platform-tag">DeepSeek</span>
+            <span class="platform-tag">Qwen</span>
+            <span class="platform-tag">Gemini</span>
+            <span class="platform-tag">Kimi</span>
+            <span class="platform-tag">ChatGLM</span>
+            <span class="platform-tag">HuggingChat</span>
+            <span class="platform-tag">Poe</span>
+            <span class="platform-tag">Perplexity</span>
+            <span class="platform-tag">You.com</span>
+        </div>
+    </div>
+
+    <div class="actions">
+        <button class="primary-btn" id="copyFullChat">&#128196; Copy Full Chat</button>
+        <button class="success-btn" id="copyLastResponse">&#128203; Copy Last Response</button>
+        <button class="primary-btn" id="copyAllCode">&#128187; Copy All Code Blocks</button>
+        <button class="secondary-btn" id="exportMarkdown">&#128221; Export as Markdown</button>
+    </div>
+
+    <div class="settings">
+        <label for="ideSelect">Target IDE:</label>
+        <select id="ideSelect">
+            <option value="auto">Auto-detect</option>
+            <option value="vscode">Visual Studio Code</option>
+            <option value="pycharm">PyCharm</option>
+            <option value="intellij">IntelliJ IDEA</option>
+            <option value="sublime">Sublime Text</option>
+            <option value="atom">Atom</option>
+        </select>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

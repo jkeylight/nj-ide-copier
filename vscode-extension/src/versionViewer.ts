@@ -1,0 +1,176 @@
+import * as vscode from 'vscode';
+import { HttpClient } from './utils/httpClient';
+
+export class VersionViewer {
+    constructor(
+        private context: vscode.ExtensionContext,
+        private httpClient: HttpClient
+    ) {}
+
+    async showHistory(): Promise<void> {
+        try {
+            const response = await this.httpClient.get('/versions');
+
+            if (response && response.blocks && response.blocks.length > 0) {
+                const panel = vscode.window.createWebviewPanel(
+                    'njIdeCopierHistory',
+                    'NJ Copier - Version History',
+                    vscode.ViewColumn.One,
+                    { enableScripts: true, retainContextWhenHidden: true }
+                );
+
+                panel.webview.html = this.generateHistoryHtml(response.blocks);
+            } else {
+                vscode.window.showInformationMessage('No version history available');
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to load history: ${error}`);
+        }
+    }
+
+    async revertVersion(): Promise<void> {
+        try {
+            const response = await this.httpClient.get('/versions');
+
+            if (!response || !response.blocks || response.blocks.length === 0) {
+                vscode.window.showWarningMessage('No versions available to revert');
+                return;
+            }
+
+            interface BlockItem extends vscode.QuickPickItem {
+                blockData: any;
+            }
+
+            const blocks: BlockItem[] = response.blocks.map((block: any, index: number) => ({
+                label: `${block.language} - Block ${index + 1}`,
+                description: `${block.versions.length} versions`,
+                blockData: block
+            }));
+
+            const selectedBlock = await vscode.window.showQuickPick(blocks, {
+                placeHolder: 'Select code block to revert'
+            });
+
+            if (!selectedBlock) {
+                return;
+            }
+
+            interface VersionItem extends vscode.QuickPickItem {
+                versionData: any;
+            }
+
+            const versions: VersionItem[] = selectedBlock.blockData.versions.map((version: any) => ({
+                label: `Version ${version.version_id}`,
+                description: version.status,
+                detail: version.change_summary || 'No changes',
+                versionData: version
+            }));
+
+            const selectedVersion = await vscode.window.showQuickPick(versions, {
+                placeHolder: 'Select version to revert to'
+            });
+
+            if (!selectedVersion) {
+                return;
+            }
+
+            const confirmation = await vscode.window.showWarningMessage(
+                `Revert to version ${selectedVersion.versionData.version_id}?`,
+                { modal: true },
+                'Yes',
+                'No'
+            );
+
+            if (confirmation !== 'Yes') {
+                return;
+            }
+
+            const revertResponse = await this.httpClient.post('/version/revert', {
+                block_id: selectedBlock.blockData.block_id,
+                version_id: selectedVersion.versionData.version_id
+            });
+
+            if (revertResponse.status === 'success') {
+                vscode.window.showInformationMessage(
+                    `Reverted to version ${selectedVersion.versionData.version_id}`
+                );
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to revert version: ${error}`);
+        }
+    }
+
+    private generateHistoryHtml(blocks: any[]): string {
+        const blockHtml = blocks.map((block, index) => {
+            const versionsHtml = block.versions.map((version: any, vIndex: number) => {
+                const statusClass = this.getStatusClass(version.status);
+                const isCurrent = vIndex === block.versions.length - 1;
+
+                return `
+                    <div class="version-item ${statusClass} ${isCurrent ? 'current' : ''}">
+                        <div class="version-header">
+                            <span class="version-id">${version.version_id}</span>
+                            <span class="status-badge ${statusClass}">${version.status}</span>
+                            ${isCurrent ? '<span class="current-badge">Current</span>' : ''}
+                        </div>
+                        <div class="version-meta">
+                            ${version.change_summary ? `<p>${version.change_summary}</p>` : ''}
+                        </div>
+                        <pre class="code-preview"><code>${this.escapeHtml(version.code.substring(0, 500))}${version.code.length > 500 ? '...' : ''}</code></pre>
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="block-section">
+                    <h3>${block.language} - Block ${index + 1}</h3>
+                    <p class="block-info">Block ID: ${block.block_id} | Updated: ${new Date(block.updated_at * 1000).toLocaleString()}</p>
+                    <div class="versions-list">${versionsHtml}</div>
+                </div>
+            `;
+        }).join('');
+
+        return `<!DOCTYPE html>
+<html>
+<head>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 20px; background: #1e1e1e; color: #ccc; }
+.block-section { background: #2d2d2d; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+.block-section h3 { color: #4fc3f7; margin: 0 0 10px 0; }
+.block-info { color: #888; font-size: 12px; }
+.versions-list { display: flex; flex-direction: column; gap: 10px; }
+.version-item { border: 1px solid #444; border-radius: 6px; padding: 10px; }
+.version-item.error { border-left: 4px solid #f44336; }
+.version-item.fixed { border-left: 4px solid #4caf50; }
+.version-item.current { background: #383838; border: 2px solid #4fc3f7; }
+.version-header { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
+.version-id { font-weight: bold; }
+.status-badge { padding: 2px 8px; border-radius: 12px; font-size: 11px; }
+.status-badge.error { background: #5c2020; color: #f48771; }
+.status-badge.fixed { background: #1e3a1e; color: #81c784; }
+.current-badge { background: #0e639c; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px; }
+.code-preview { background: #1e1e1e; border: 1px solid #444; border-radius: 4px; padding: 10px; font-family: 'Consolas', monospace; font-size: 12px; overflow-x: auto; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h2 style="color:#4fc3f7">Version History</h2>
+${blockHtml}
+</body>
+</html>`;
+    }
+
+    private getStatusClass(status: string): string {
+        switch (status.toLowerCase()) {
+            case 'error': return 'error';
+            case 'fixed': return 'fixed';
+            default: return '';
+        }
+    }
+
+    private escapeHtml(text: string): string {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+}

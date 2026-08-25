@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NJ IDE Copier - Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="dashboard">
+        <aside class="sidebar">
+            <div style="padding: 16px; margin-bottom: 24px;">
+                <h2 style="color: #2196F3; font-size: 20px;">🚀 NJ IDE Copier</h2>
+            </div>
+            <nav>
+                <a class="nav-item active" href="#dashboard">📊 Dashboard</a>
+                <a class="nav-item" href="#code-blocks">💻 Code Blocks</a>
+                <a class="nav-item" href="#versions">📚 Version History</a>
+                <a class="nav-item" href="#errors">⚠️ Error Tracker</a>
+                <a class="nav-item" href="#settings">⚙️ Settings</a>
+            </nav>
+            <div style="margin-top: auto; padding-top: 24px;">
+                <div class="card" style="padding: 16px;">
+                    <h4 style="margin-bottom: 8px;">Server Status</h4>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="width: 10px; height: 10px; background: #4CAF50; border-radius: 50%; animation: pulse 2s infinite;"></span>
+                        <span style="color: #4CAF50; font-weight: 500;">Running</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <header class="header">
+            <div style="flex: 1;">
+                <input type="text" placeholder="Search code, errors..." style="width: 100%; padding: 8px 16px; border: 1px solid #e0e0e0; border-radius: 9999px; font-size: 14px;">
+            </div>
+            <button class="btn btn-primary">📋 Copy Last Code</button>
+        </header>
+
+        <main class="main-content">
+            <div class="stats-grid">
+                <div class="stat-card"><div class="stat-value" id="totalBlocks">0</div><div class="stat-label">Code Blocks</div></div>
+                <div class="stat-card"><div class="stat-value" id="totalVersions">0</div><div class="stat-label">Versions</div></div>
+                <div class="stat-card"><div class="stat-value" id="errorFixes">0</div><div class="stat-label">Errors Fixed</div></div>
+                <div class="stat-card"><div class="stat-value" id="activeBlocks">0</div><div class="stat-label">Active Blocks</div></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3>Recent Code Blocks</h3>
+                    <button class="btn btn-secondary" style="font-size: 12px;">View All</button>
+                </div>
+                <div id="blockList"><p>Loading...</p></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h3>Error Analytics</h3></div>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; text-align: center;">
+                    <div><div class="badge badge-error" style="margin-bottom: 8px;">TypeError</div><div style="font-size: 20px; font-weight: 600;">0</div><small style="color: #757575;">occurrences</small></div>
+                    <div><div class="badge badge-warning" style="margin-bottom: 8px;">SyntaxError</div><div style="font-size: 20px; font-weight: 600;">0</div><small style="color: #757575;">occurrences</small></div>
+                    <div><div class="badge badge-info" style="margin-bottom: 8px;">ImportError</div><div style="font-size: 20px; font-weight: 600;">0</div><small style="color: #757575;">occurrences</small></div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,5713 @@
+can we  build a a app that automatically copy text and  code from deepseek to ide
+I'll help you build an app that can automatically copy text and code from DeepSeek to your IDE. Here's a comprehensive solution with multiple approaches:
+
+Approach 1: Browser Extension + Local Server
+Architecture
+text
+DeepSeek Web → Browser Extension → Local Server → IDE Plugin/CLI
+1. Browser Extension (Chrome/Firefox)
+manifest.json
+
+json
+{
+  "manifest_version": 3,
+  "name": "DeepSeek to IDE Copier",
+  "version": "1.0",
+  "permissions": ["clipboardWrite", "storage", "activeTab"],
+  "host_permissions": ["http://localhost:8765/*"],
+  "content_scripts": [{
+    "matches": ["*://chat.deepseek.com/*"],
+    "js": ["content.js"],
+    "css": ["styles.css"]
+  }],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
+content.js - Extracts code blocks and text from DeepSeek
+
+javascript
+// Detect and extract code blocks from DeepSeek responses
+function extractCodeBlocks() {
+  const codeBlocks = [];
+  const preElements = document.querySelectorAll('pre');
+  
+  preElements.forEach((pre, index) => {
+    const code = pre.querySelector('code');
+    if (code) {
+      // Detect language
+      const languageClass = code.className.match(/language-(\w+)/);
+      const language = languageClass ? languageClass[1] : 'text';
+      
+      codeBlocks.push({
+        id: `code-${Date.now()}-${index}`,
+        language: language,
+        code: code.textContent,
+        element: pre
+      });
+      
+      // Add copy button
+      addCopyButton(pre, codeBlocks[codeBlocks.length - 1]);
+    }
+  });
+  
+  return codeBlocks;
+}
+
+function addCopyButton(preElement, codeBlock) {
+  const button = document.createElement('button');
+  button.className = 'copy-to-ide-btn';
+  button.textContent = '📋 Copy to IDE';
+  button.style.cssText = `
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    padding: 5px 10px;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    z-index: 1000;
+  `;
+  
+  button.addEventListener('click', async () => {
+    await sendToServer(codeBlock);
+    button.textContent = '✅ Copied!';
+    setTimeout(() => button.textContent = '📋 Copy to IDE', 2000);
+  });
+  
+  preElement.style.position = 'relative';
+  preElement.appendChild(button);
+}
+
+async function sendToServer(codeBlock) {
+  try {
+    const response = await fetch('http://localhost:8765/copy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(codeBlock)
+    });
+    
+    if (!response.ok) throw new Error('Failed to send');
+    
+    // Also copy to clipboard as fallback
+    await navigator.clipboard.writeText(codeBlock.code);
+  } catch (error) {
+    console.error('Error sending to server:', error);
+    // Fallback to clipboard only
+    await navigator.clipboard.writeText(codeBlock.code);
+  }
+}
+
+// Observe DOM changes for new messages
+const observer = new MutationObserver(() => {
+  extractCodeBlocks();
+});
+
+observer.observe(document.body, {
+  childList: true,
+  subtree: true
+});
+
+// Initial extraction
+extractCodeBlocks();
+2. Local Server (Python)
+server.py
+
+python
+import json
+import asyncio
+import websockets
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
+import subprocess
+import os
+import platform
+import pyperclip
+from pathlib import Path
+import time
+
+class CopyHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length)
+        data = json.loads(post_data.decode('utf-8'))
+        
+        # Store in memory
+        self.server.last_copy = data
+        
+        # Copy to clipboard
+        pyperclip.copy(data['code'])
+        
+        # Send to active IDE
+        send_to_ide(data)
+        
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps({"status": "success"}).encode())
+    
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+
+def send_to_ide(data):
+    """Send code to active IDE using platform-specific methods"""
+    code = data['code']
+    language = data.get('language', 'text')
+    
+    # Method 1: Try VS Code CLI
+    if try_vscode(code, language):
+        return
+    
+    # Method 2: Try JetBrains IDEs
+    if try_jetbrains(code, language):
+        return
+    
+    # Method 3: Clipboard is already set as fallback
+    print(f"✅ Code copied to clipboard ({language})")
+
+def try_vscode(code, language):
+    """Try to insert code into VS Code"""
+    try:
+        # Check if VS Code is installed
+        vscode_paths = [
+            'code',  # If in PATH
+            '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',  # macOS
+            'C:\\Program Files\\Microsoft VS Code\\bin\\code.cmd'  # Windows
+        ]
+        
+        vscode_cmd = None
+        for path in vscode_paths:
+            if os.path.exists(path) or subprocess.run(['which', path], 
+                capture_output=True).returncode == 0:
+                vscode_cmd = path
+                break
+        
+        if vscode_cmd:
+            # Create temporary file
+            temp_file = Path.home() / '.deepseek_temp' / f'snippet.{get_extension(language)}'
+            temp_file.parent.mkdir(exist_ok=True)
+            temp_file.write_text(code)
+            
+            # Open in VS Code
+            subprocess.Popen([vscode_cmd, str(temp_file)])
+            return True
+    except:
+        pass
+    return False
+
+def try_jetbrains(code, language):
+    """Try to insert code into JetBrains IDE"""
+    # This would require IDE-specific plugins
+    return False
+
+def get_extension(language):
+    extensions = {
+        'python': 'py',
+        'javascript': 'js',
+        'typescript': 'ts',
+        'java': 'java',
+        'cpp': 'cpp',
+        'c': 'c',
+        'html': 'html',
+        'css': 'css',
+        'json': 'json',
+        'markdown': 'md',
+        'sql': 'sql',
+        'bash': 'sh',
+        'yaml': 'yml',
+        'xml': 'xml',
+        'rust': 'rs',
+        'go': 'go',
+        'ruby': 'rb',
+        'php': 'php',
+    }
+    return extensions.get(language, 'txt')
+
+class ThreadedHTTPServer(HTTPServer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.last_copy = None
+
+def start_server():
+    server = ThreadedHTTPServer(('localhost', 8765), CopyHandler)
+    print("🚀 Server running on http://localhost:8765")
+    print("📋 Ready to copy from DeepSeek to IDE")
+    server.serve_forever()
+
+if __name__ == '__main__':
+    start_server()
+3. CLI Tool for Manual Copy
+deepseek_copy.py
+
+python
+#!/usr/bin/env python3
+import argparse
+import pyperclip
+import time
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+class DeepSeekCopier:
+    def __init__(self):
+        self.config_dir = Path.home() / '.deepseek-copier'
+        self.config_file = self.config_dir / 'config.json'
+        self.history_file = self.config_dir / 'history.json'
+        self.load_config()
+    
+    def load_config(self):
+        self.config_dir.mkdir(exist_ok=True)
+        if self.config_file.exists():
+            self.config = json.loads(self.config_file.read_text())
+        else:
+            self.config = {
+                'default_ide': 'vscode',
+                'auto_copy': True,
+                'watch_clipboard': False
+            }
+    
+    def copy_to_ide(self, text, language='text', filename=None):
+        """Copy text to IDE"""
+        # Copy to clipboard
+        pyperclip.copy(text)
+        
+        # Save to history
+        self.save_history(text, language)
+        
+        # Try to open in IDE
+        if filename:
+            self.open_in_ide(text, language, filename)
+        
+        print(f"✅ Copied {len(text)} characters to clipboard")
+        return True
+    
+    def save_history(self, text, language):
+        """Save copy history"""
+        history = []
+        if self.history_file.exists():
+            history = json.loads(self.history_file.read_text())
+        
+        history.append({
+            'timestamp': time.time(),
+            'language': language,
+            'length': len(text),
+            'content': text[:1000]  # Save first 1000 chars
+        })
+        
+        # Keep last 100 entries
+        history = history[-100:]
+        self.history_file.write_text(json.dumps(history, indent=2))
+    
+    def open_in_ide(self, text, language, filename):
+        """Open file in IDE"""
+        # Create temp file
+        temp_dir = self.config_dir / 'temp'
+        temp_dir.mkdir(exist_ok=True)
+        temp_file = temp_dir / filename
+        
+        # Write content
+        temp_file.write_text(text)
+        
+        # Open in IDE based on config
+        ide = self.config.get('default_ide', 'vscode')
+        
+        if ide == 'vscode':
+            subprocess.Popen(['code', str(temp_file)])
+        elif ide == 'sublime':
+            subprocess.Popen(['subl', str(temp_file)])
+        elif ide == 'atom':
+            subprocess.Popen(['atom', str(temp_file)])
+        else:
+            print(f"⚠️ Unknown IDE: {ide}")
+    
+    def watch_clipboard(self):
+        """Watch clipboard for changes"""
+        print("👀 Watching clipboard... Press Ctrl+C to stop")
+        last_content = ''
+        
+        try:
+            while True:
+                current = pyperclip.paste()
+                if current != last_content:
+                    print(f"📋 Clipboard changed: {len(current)} chars")
+                    self.save_history(current, 'text')
+                    last_content = current
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            print("\n👋 Stopped watching")
+
+def main():
+    parser = argparse.ArgumentParser(description='DeepSeek to IDE Copier')
+    parser.add_argument('--text', '-t', help='Text to copy')
+    parser.add_argument('--file', '-f', help='File to copy from')
+    parser.add_argument('--language', '-l', default='text', help='Code language')
+    parser.add_argument('--filename', help='Filename for IDE')
+    parser.add_argument('--watch', '-w', action='store_true', help='Watch clipboard')
+    parser.add_argument('--ide', help='IDE to use (vscode, sublime, atom)')
+    
+    args = parser.parse_args()
+    copier = DeepSeekCopier()
+    
+    if args.ide:
+        copier.config['default_ide'] = args.ide
+        copier.config_file.write_text(json.dumps(copier.config, indent=2))
+        print(f"✅ Default IDE set to: {args.ide}")
+    
+    if args.watch:
+        copier.watch_clipboard()
+    elif args.text:
+        copier.copy_to_ide(args.text, args.language, args.filename)
+    elif args.file:
+        text = Path(args.file).read_text()
+        language = Path(args.file).suffix[1:] if Path(args.file).suffix else 'text'
+        copier.copy_to_ide(text, language, args.filename or Path(args.file).name)
+    else:
+        # Read from stdin
+        text = sys.stdin.read()
+        if text:
+            copier.copy_to_ide(text, args.language, args.filename)
+        else:
+            parser.print_help()
+
+if __name__ == '__main__':
+    main()
+4. VS Code Extension
+package.json (for VS Code extension)
+
+json
+{
+  "name": "deepseek-copier",
+  "displayName": "DeepSeek Copier",
+  "version": "1.0.0",
+  "description": "Automatically receive code from DeepSeek",
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [{
+      "command": "deepseek.startServer",
+      "title": "DeepSeek: Start Server"
+    }],
+    "configuration": {
+      "title": "DeepSeek Copier",
+      "properties": {
+        "deepseek.autoInsert": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-insert code at cursor position"
+        },
+        "deepseek.serverPort": {
+          "type": "number",
+          "default": 8765,
+          "description": "Server port"
+        }
+      }
+    }
+  }
+}
+extension.js
+
+javascript
+const vscode = require('vscode');
+const http = require('http');
+const WebSocket = require('ws');
+
+let server;
+let wss;
+let statusBarItem;
+
+function activate(context) {
+    console.log('DeepSeek Copier is active');
+    
+    // Create status bar item
+    statusBarItem = vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Right, 100
+    );
+    statusBarItem.text = "$(cloud-download) DeepSeek";
+    statusBarItem.command = 'deepseek.startServer';
+    statusBarItem.show();
+    
+    // Register commands
+    let startServer = vscode.commands.registerCommand(
+        'deepseek.startServer', startServerCommand
+    );
+    
+    context.subscriptions.push(startServer);
+    context.subscriptions.push(statusBarItem);
+    
+    // Auto-start server
+    startServerCommand();
+}
+
+function startServerCommand() {
+    const config = vscode.workspace.getConfiguration('deepseek');
+    const port = config.get('serverPort', 8765);
+    
+    if (server) {
+        vscode.window.showInformationMessage('DeepSeek server already running');
+        return;
+    }
+    
+    // Create HTTP server for basic requests
+    server = http.createServer((req, res) => {
+        if (req.method === 'POST' && req.url === '/copy') {
+            let body = '';
+            req.on('data', chunk => body += chunk);
+            req.on('end', () => {
+                try {
+                    const data = JSON.parse(body);
+                    insertCode(data.code, data.language);
+                    
+                    res.writeHead(200, {'Content-Type': 'application/json'});
+                    res.end(JSON.stringify({status: 'success'}));
+                } catch (error) {
+                    res.writeHead(500, {'Content-Type': 'application/json'});
+                    res.end(JSON.stringify({status: 'error', message: error.message}));
+                }
+            });
+        } else {
+            res.writeHead(404);
+            res.end();
+        }
+    });
+    
+    // Create WebSocket server for real-time updates
+    wss = new WebSocket.Server({ server });
+    
+    wss.on('connection', (ws) => {
+        ws.on('message', (message) => {
+            try {
+                const data = JSON.parse(message);
+                if (data.type === 'code') {
+                    insertCode(data.code, data.language);
+                }
+            } catch (error) {
+                console.error('Error processing message:', error);
+            }
+        });
+    });
+    
+    server.listen(port, () => {
+        statusBarItem.text = `$(check) DeepSeek:${port}`;
+        vscode.window.showInformationMessage(
+            `DeepSeek server started on port ${port}`
+        );
+    });
+}
+
+function insertCode(code, language) {
+    const editor = vscode.window.activeTextEditor;
+    
+    if (!editor) {
+        vscode.window.showWarningMessage('No active editor');
+        return;
+    }
+    
+    const config = vscode.workspace.getConfiguration('deepseek');
+    const autoInsert = config.get('autoInsert', true);
+    
+    if (autoInsert) {
+        editor.edit((editBuilder) => {
+            const position = editor.selection.active;
+            editBuilder.insert(position, code);
+        }).then(() => {
+            vscode.window.showInformationMessage('Code inserted from DeepSeek');
+        });
+    }
+}
+
+function deactivate() {
+    if (server) {
+        server.close();
+    }
+    if (wss) {
+        wss.close();
+    }
+}
+
+module.exports = {
+    activate,
+    deactivate
+};
+5. Installation and Usage
+Setup Script (setup.sh)
+
+bash
+#!/bin/bash
+
+echo "🚀 Setting up DeepSeek to IDE Copier..."
+
+# Create directories
+mkdir -p ~/.deepseek-copier/temp
+
+# Install Python dependencies
+pip install pyperclip websockets
+
+# Make Python script executable
+chmod +x deepseek_copy.py
+
+# Copy to /usr/local/bin
+sudo cp deepseek_copy.py /usr/local/bin/deepseek-copy
+
+# Start server
+echo "Starting server..."
+python3 server.py &
+
+echo "✅ Installation complete!"
+echo ""
+echo "Usage:"
+echo "  1. Install browser extension"
+echo "  2. Run: deepseek-copy --text 'your code' --language python"
+echo "  3. Or: deepseek-copy --file code.py"
+echo "  4. Or: deepseek-copy --watch"
+Quick Setup Guide
+Install dependencies:
+
+bash
+pip install pyperclip websockets
+Start the server:
+
+bash
+python server.py
+Install browser extension:
+
+Open Chrome → Extensions → Developer Mode
+
+Load unpacked → Select extension folder
+
+Usage:
+
+Browse DeepSeek
+
+Click "📋 Copy to IDE" button on code blocks
+
+Code automatically appears in your IDE
+
+Would you like me to add any specific features or adapt this for a particular IDE?
+
+can it also copy tthe full chatt page and how will it recognize which ide
+Absolutely! Let me expand the solution to handle full chat page copying and intelligent IDE detection.
+
+Enhanced Full Chat Page Copier with IDE Auto-Detection
+1. Enhanced Browser Extension
+manifest.json (Updated)
+
+json
+{
+  "manifest_version": 3,
+  "name": "DeepSeek Full Chat Copier",
+  "version": "2.0",
+  "permissions": [
+    "clipboardWrite", 
+    "storage", 
+    "activeTab",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://localhost:8765/*",
+    "*://chat.deepseek.com/*"
+  ],
+  "content_scripts": [{
+    "matches": ["*://chat.deepseek.com/*"],
+    "js": ["content.js"],
+    "css": ["styles.css"],
+    "run_at": "document_idle"
+  }],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  }
+}
+2. Enhanced Content Script with Full Chat Export
+content.js
+
+javascript
+// Full-featured content script for DeepSeek chat extraction
+
+class DeepSeekExtractor {
+    constructor() {
+        this.observer = null;
+        this.init();
+    }
+
+    init() {
+        this.setupUI();
+        this.setupObserver();
+        this.extractCodeBlocks();
+    }
+
+    setupUI() {
+        // Add floating action buttons
+        const buttonContainer = document.createElement('div');
+        buttonContainer.id = 'deepseek-actions';
+        buttonContainer.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 999999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        `;
+
+        // Full chat copy button
+        const fullChatBtn = this.createButton(
+            '📄 Copy Full Chat', 
+            '#2196F3', 
+            () => this.copyFullChat()
+        );
+
+        // Copy last response button
+        const lastResponseBtn = this.createButton(
+            '📋 Copy Last Response', 
+            '#4CAF50', 
+            () => this.copyLastResponse()
+        );
+
+        // Copy all code blocks button
+        const allCodeBtn = this.createButton(
+            '💻 Copy All Code', 
+            '#FF9800', 
+            () => this.copyAllCodeBlocks()
+        );
+
+        // Export as markdown button
+        const exportMdBtn = this.createButton(
+            '📝 Export Markdown', 
+            '#9C27B0', 
+            () => this.exportAsMarkdown()
+        );
+
+        buttonContainer.appendChild(fullChatBtn);
+        buttonContainer.appendChild(lastResponseBtn);
+        buttonContainer.appendChild(allCodeBtn);
+        buttonContainer.appendChild(exportMdBtn);
+
+        document.body.appendChild(buttonContainer);
+    }
+
+    createButton(text, color, onClick) {
+        const button = document.createElement('button');
+        button.textContent = text;
+        button.style.cssText = `
+            padding: 10px 15px;
+            background: ${color};
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            transition: all 0.3s;
+            white-space: nowrap;
+        `;
+        button.onmouseover = () => button.style.transform = 'scale(1.05)';
+        button.onmouseout = () => button.style.transform = 'scale(1)';
+        button.onclick = onClick;
+        return button;
+    }
+
+    setupObserver() {
+        // Watch for new messages
+        this.observer = new MutationObserver(() => {
+            this.extractCodeBlocks();
+        });
+
+        this.observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    extractCodeBlocks() {
+        const codeBlocks = [];
+        const preElements = document.querySelectorAll('pre');
+        
+        preElements.forEach((pre, index) => {
+            const code = pre.querySelector('code');
+            if (code && !pre.dataset.deepseekProcessed) {
+                // Detect language
+                const languageClass = code.className.match(/language-(\w+)/);
+                const language = languageClass ? languageClass[1] : 'text';
+                
+                codeBlocks.push({
+                    id: `code-${Date.now()}-${index}`,
+                    language: language,
+                    code: code.textContent,
+                    element: pre
+                });
+                
+                // Add copy button to code block
+                this.addCodeBlockButton(pre, codeBlocks[codeBlocks.length - 1]);
+                
+                // Mark as processed
+                pre.dataset.deepseekProcessed = 'true';
+            }
+        });
+        
+        return codeBlocks;
+    }
+
+    addCodeBlockButton(preElement, codeBlock) {
+        const buttonContainer = document.createElement('div');
+        buttonContainer.style.cssText = `
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            display: flex;
+            gap: 5px;
+        `;
+
+        const copyBtn = document.createElement('button');
+        copyBtn.textContent = '📋 Copy';
+        copyBtn.style.cssText = `
+            padding: 5px 10px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        `;
+        copyBtn.onclick = async () => {
+            await this.sendToServer(codeBlock);
+            copyBtn.textContent = '✅ Copied!';
+            setTimeout(() => copyBtn.textContent = '📋 Copy', 2000);
+        };
+
+        buttonContainer.appendChild(copyBtn);
+        preElement.style.position = 'relative';
+        preElement.appendChild(buttonContainer);
+    }
+
+    async copyFullChat() {
+        const chatData = this.extractFullChat();
+        await this.sendToServer({
+            type: 'full_chat',
+            ...chatData
+        });
+        this.showNotification('✅ Full chat copied to IDE!');
+    }
+
+    async copyLastResponse() {
+        const messages = this.extractAllMessages();
+        if (messages.length > 0) {
+            const lastMessage = messages[messages.length - 1];
+            await this.sendToServer({
+                type: 'message',
+                ...lastMessage
+            });
+            this.showNotification('✅ Last response copied!');
+        }
+    }
+
+    async copyAllCodeBlocks() {
+        const codeBlocks = this.extractAllCodeBlocks();
+        if (codeBlocks.length > 0) {
+            await this.sendToServer({
+                type: 'all_code',
+                blocks: codeBlocks
+            });
+            this.showNotification(`✅ ${codeBlocks.length} code blocks copied!`);
+        }
+    }
+
+    async exportAsMarkdown() {
+        const markdown = this.convertToMarkdown();
+        await this.sendToServer({
+            type: 'markdown',
+            content: markdown,
+            filename: `deepseek-chat-${Date.now()}.md`
+        });
+        this.showNotification('✅ Chat exported as Markdown!');
+    }
+
+    extractFullChat() {
+        const messages = this.extractAllMessages();
+        const title = this.extractChatTitle();
+        
+        return {
+            title: title,
+            timestamp: new Date().toISOString(),
+            messages: messages,
+            totalMessages: messages.length,
+            url: window.location.href
+        };
+    }
+
+    extractAllMessages() {
+        const messages = [];
+        const messageElements = document.querySelectorAll('[class*="message"], [class*="chat-message"], [class*="conversation-turn"]');
+        
+        messageElements.forEach((element, index) => {
+            // Try to determine if it's user or assistant message
+            const isUser = this.isUserMessage(element);
+            const content = this.extractMessageContent(element);
+            const codeBlocks = this.extractCodeFromMessage(element);
+            
+            if (content) {
+                messages.push({
+                    id: index,
+                    role: isUser ? 'user' : 'assistant',
+                    content: content,
+                    codeBlocks: codeBlocks,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        });
+        
+        return messages;
+    }
+
+    isUserMessage(element) {
+        // Check for user message indicators
+        const classNames = element.className || '';
+        const text = element.textContent || '';
+        
+        // Look for common patterns
+        if (classNames.includes('user') || classNames.includes('human')) {
+            return true;
+        }
+        
+        // Check for avatar or user icon
+        if (element.querySelector('[class*="user-avatar"], [class*="user-icon"]')) {
+            return true;
+        }
+        
+        // Check position or styling
+        const style = window.getComputedStyle(element);
+        if (style.textAlign === 'right' || style.alignSelf === 'flex-end') {
+            return true;
+        }
+        
+        return false;
+    }
+
+    extractMessageContent(element) {
+        // Try multiple selectors for message content
+        const selectors = [
+            '[class*="message-content"]',
+            '[class*="content"]',
+            '[class*="text"]',
+            'p',
+            'div'
+        ];
+        
+        for (const selector of selectors) {
+            const contentElement = element.querySelector(selector);
+            if (contentElement && contentElement.textContent.trim()) {
+                return contentElement.textContent.trim();
+            }
+        }
+        
+        return element.textContent.trim();
+    }
+
+    extractCodeFromMessage(element) {
+        const codeBlocks = [];
+        const preElements = element.querySelectorAll('pre');
+        
+        preElements.forEach((pre, index) => {
+            const code = pre.querySelector('code');
+            if (code) {
+                const languageClass = code.className.match(/language-(\w+)/);
+                const language = languageClass ? languageClass[1] : 'text';
+                
+                codeBlocks.push({
+                    id: index,
+                    language: language,
+                    code: code.textContent
+                });
+            }
+        });
+        
+        return codeBlocks;
+    }
+
+    extractAllCodeBlocks() {
+        const allBlocks = [];
+        const preElements = document.querySelectorAll('pre');
+        
+        preElements.forEach((pre, index) => {
+            const code = pre.querySelector('code');
+            if (code) {
+                const languageClass = code.className.match(/language-(\w+)/);
+                const language = languageClass ? languageClass[1] : 'text';
+                
+                allBlocks.push({
+                    id: index,
+                    language: language,
+                    code: code.textContent
+                });
+            }
+        });
+        
+        return allBlocks;
+    }
+
+    extractChatTitle() {
+        // Try to find chat title
+        const titleSelectors = [
+            'h1',
+            '[class*="title"]',
+            '[class*="chat-title"]',
+            '[class*="conversation-title"]'
+        ];
+        
+        for (const selector of titleSelectors) {
+            const titleElement = document.querySelector(selector);
+            if (titleElement && titleElement.textContent.trim()) {
+                return titleElement.textContent.trim();
+            }
+        }
+        
+        return 'DeepSeek Chat';
+    }
+
+    convertToMarkdown() {
+        const chat = this.extractFullChat();
+        let markdown = `# ${chat.title}\n\n`;
+        markdown += `> Exported: ${new Date(chat.timestamp).toLocaleString()}\n`;
+        markdown += `> URL: ${chat.url}\n\n`;
+        markdown += `---\n\n`;
+        
+        chat.messages.forEach((message, index) => {
+            const role = message.role === 'user' ? '🧑 User' : '🤖 Assistant';
+            markdown += `## ${role} (Message ${index + 1})\n\n`;
+            markdown += `${message.content}\n\n`;
+            
+            if (message.codeBlocks && message.codeBlocks.length > 0) {
+                message.codeBlocks.forEach((block, blockIndex) => {
+                    markdown += `### Code Block ${blockIndex + 1}\n\n`;
+                    markdown += `\`\`\`${block.language}\n${block.code}\n\`\`\`\n\n`;
+                });
+            }
+            
+            markdown += `---\n\n`;
+        });
+        
+        return markdown;
+    }
+
+    async sendToServer(data) {
+        try {
+            const response = await fetch('http://localhost:8765/copy', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify(data)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const result = await response.json();
+            
+            // Also copy to clipboard as fallback
+            await this.copyToClipboard(data);
+            
+            return result;
+        } catch (error) {
+            console.error('Error sending to server:', error);
+            // Fallback to clipboard only
+            await this.copyToClipboard(data);
+            return { status: 'clipboard_only' };
+        }
+    }
+
+    async copyToClipboard(data) {
+        let text = '';
+        
+        if (data.type === 'full_chat') {
+            text = this.formatFullChatForClipboard(data);
+        } else if (data.type === 'message') {
+            text = data.content;
+        } else if (data.type === 'all_code') {
+            text = data.blocks.map(b => b.code).join('\n\n');
+        } else if (data.type === 'markdown') {
+            text = data.content;
+        } else {
+            text = data.code || data.content || '';
+        }
+        
+        try {
+            await navigator.clipboard.writeText(text);
+        } catch (error) {
+            console.error('Failed to copy to clipboard:', error);
+        }
+    }
+
+    formatFullChatForClipboard(chat) {
+        let text = `Title: ${chat.title}\n`;
+        text += `Date: ${new Date(chat.timestamp).toLocaleString()}\n`;
+        text += `${'='.repeat(50)}\n\n`;
+        
+        chat.messages.forEach((message, index) => {
+            text += `${message.role.toUpperCase()}:\n`;
+            text += `${message.content}\n`;
+            
+            if (message.codeBlocks && message.codeBlocks.length > 0) {
+                text += `\nCode Blocks:\n`;
+                message.codeBlocks.forEach((block, blockIndex) => {
+                    text += `[${block.language}]\n${block.code}\n`;
+                });
+            }
+            
+            text += `\n${'-'.repeat(30)}\n\n`;
+        });
+        
+        return text;
+    }
+
+    showNotification(message) {
+        const notification = document.createElement('div');
+        notification.textContent = message;
+        notification.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #333;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 5px;
+            z-index: 999999;
+            animation: slideIn 0.3s ease;
+        `;
+        
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.style.animation = 'slideOut 0.3s ease';
+            setTimeout(() => notification.remove(), 300);
+        }, 3000);
+    }
+}
+
+// Add CSS animations
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideIn {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+    }
+    
+    @keyframes slideOut {
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(100%); opacity: 0; }
+    }
+`;
+document.head.appendChild(style);
+
+// Initialize
+const extractor = new DeepSeekExtractor();
+3. Enhanced Server with IDE Auto-Detection
+server.py (Updated with IDE detection)
+
+python
+import json
+import asyncio
+import subprocess
+import os
+import sys
+import platform
+import time
+import psutil
+import pyperclip
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
+import threading
+import socket
+import shutil
+from typing import Dict, List, Optional
+import re
+
+class IDEDetector:
+    """Detect and manage different IDEs"""
+    
+    def __init__(self):
+        self.ides = self.detect_ides()
+        self.active_ide = None
+        self.ide_processes = {}
+        
+    def detect_ides(self) -> Dict[str, Dict]:
+        """Detect installed IDEs"""
+        ides = {}
+        system = platform.system()
+        
+        # VS Code
+        vscode_paths = [
+            'code',
+            '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code',
+            'C:\\Program Files\\Microsoft VS Code\\Code.exe',
+            'C:\\Users\\' + os.getenv('USERNAME', '') + '\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe'
+        ]
+        for path in vscode_paths:
+            if self.check_command_exists(path):
+                ides['vscode'] = {
+                    'name': 'Visual Studio Code',
+                    'command': path,
+                    'type': 'vscode',
+                    'extensions_dir': Path.home() / '.vscode' / 'extensions'
+                }
+                break
+        
+        # JetBrains IDEs
+        jetbrains_ides = [
+            ('pycharm', 'PyCharm'),
+            ('intellij', 'IntelliJ IDEA'),
+            ('webstorm', 'WebStorm'),
+            ('phpstorm', 'PhpStorm'),
+            ('goland', 'GoLand'),
+            ('clion', 'CLion'),
+            ('rider', 'Rider'),
+            ('rubymine', 'RubyMine'),
+            ('datagrip', 'DataGrip')
+        ]
+        
+        if system == 'Darwin':  # macOS
+            for ide_id, ide_name in jetbrains_ides:
+                app_path = f'/Applications/{ide_name}.app'
+                if os.path.exists(app_path):
+                    ides[ide_id] = {
+                        'name': ide_name,
+                        'command': app_path,
+                        'type': 'jetbrains',
+                        'launcher': f'/usr/local/bin/{ide_id}'
+                    }
+        elif system == 'Windows':
+            for ide_id, ide_name in jetbrains_ides:
+                path = f'C:\\Program Files\\JetBrains\\{ide_name}'
+                if os.path.exists(path):
+                    ides[ide_id] = {
+                        'name': ide_name,
+                        'command': path,
+                        'type': 'jetbrains'
+                    }
+        
+        # Sublime Text
+        sublime_paths = [
+            'subl',
+            '/Applications/Sublime Text.app/Contents/SharedSupport/bin/subl',
+            'C:\\Program Files\\Sublime Text 3\\sublime_text.exe'
+        ]
+        for path in sublime_paths:
+            if self.check_command_exists(path):
+                ides['sublime'] = {
+                    'name': 'Sublime Text',
+                    'command': path,
+                    'type': 'sublime'
+                }
+                break
+        
+        # Atom
+        if self.check_command_exists('atom'):
+            ides['atom'] = {
+                'name': 'Atom',
+                'command': 'atom',
+                'type': 'atom'
+            }
+        
+        # Notepad++
+        if system == 'Windows':
+            notepad_path = 'C:\\Program Files\\Notepad++\\notepad++.exe'
+            if os.path.exists(notepad_path):
+                ides['notepadpp'] = {
+                    'name': 'Notepad++',
+                    'command': notepad_path,
+                    'type': 'notepadpp'
+                }
+        
+        return ides
+    
+    def check_command_exists(self, command: str) -> bool:
+        """Check if command exists"""
+        try:
+            if os.path.exists(command):
+                return True
+            
+            result = subprocess.run(
+                ['which', command] if platform.system() != 'Windows' else ['where', command],
+                capture_output=True,
+                text=True
+            )
+            return result.returncode == 0
+        except:
+            return False
+    
+    def detect_active_ide(self) -> Optional[str]:
+        """Detect which IDE is currently active/focused"""
+        system = platform.system()
+        
+        if system == 'Darwin':  # macOS
+            return self.detect_active_ide_macos()
+        elif system == 'Windows':
+            return self.detect_active_ide_windows()
+        elif system == 'Linux':
+            return self.detect_active_ide_linux()
+        
+        return None
+    
+    def detect_active_ide_macos(self) -> Optional[str]:
+        """Detect active IDE on macOS"""
+        try:
+            # Use AppleScript to get active application
+            script = 'tell application "System Events" to get name of first application process whose frontmost is true'
+            result = subprocess.run(['osascript', '-e', script], capture_output=True, text=True)
+            app_name = result.stdout.strip()
+            
+            # Map application names to IDE types
+            ide_mapping = {
+                'Visual Studio Code': 'vscode',
+                'PyCharm': 'pycharm',
+                'IntelliJ IDEA': 'intellij',
+                'WebStorm': 'webstorm',
+                'PhpStorm': 'phpstorm',
+                'GoLand': 'goland',
+                'CLion': 'clion',
+                'Sublime Text': 'sublime',
+                'Atom': 'atom'
+            }
+            
+            return ide_mapping.get(app_name)
+        except:
+            return None
+    
+    def detect_active_ide_windows(self) -> Optional[str]:
+        """Detect active IDE on Windows"""
+        try:
+            import win32gui
+            import win32process
+            
+            # Get foreground window
+            hwnd = win32gui.GetForegroundWindow()
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            
+            # Get process name
+            process = psutil.Process(pid)
+            process_name = process.name().lower()
+            
+            # Map process names to IDE types
+            ide_mapping = {
+                'code.exe': 'vscode',
+                'pycharm64.exe': 'pycharm',
+                'idea64.exe': 'intellij',
+                'webstorm64.exe': 'webstorm',
+                'phpstorm64.exe': 'phpstorm',
+                'goland64.exe': 'goland',
+                'clion64.exe': 'clion',
+                'sublime_text.exe': 'sublime',
+                'atom.exe': 'atom',
+                'notepad++.exe': 'notepadpp'
+            }
+            
+            return ide_mapping.get(process_name)
+        except:
+            return None
+    
+    def detect_active_ide_linux(self) -> Optional[str]:
+        """Detect active IDE on Linux"""
+        try:
+            # Use xdotool to get active window
+            result = subprocess.run(
+                ['xdotool', 'getactivewindow', 'getwindowname'],
+                capture_output=True,
+                text=True
+            )
+            window_title = result.stdout.strip().lower()
+            
+            # Check for IDE indicators in window title
+            if 'visual studio code' in window_title or 'code' in window_title:
+                return 'vscode'
+            elif 'pycharm' in window_title:
+                return 'pycharm'
+            elif 'intellij' in window_title:
+                return 'intellij'
+            elif 'sublime' in window_title:
+                return 'sublime'
+            elif 'atom' in window_title:
+                return 'atom'
+            
+            return None
+        except:
+            return None
+    
+    def get_ide_info(self, ide_id: str) -> Optional[Dict]:
+        """Get IDE information"""
+        return self.ides.get(ide_id)
+    
+    def list_available_ides(self) -> List[Dict]:
+        """List all available IDEs"""
+        return [
+            {'id': ide_id, 'name': info['name'], 'type': info['type']}
+            for ide_id, info in self.ides.items()
+        ]
+
+class DeepSeekServer:
+    def __init__(self):
+        self.ide_detector = IDEDetector()
+        self.history = []
+        self.config = self.load_config()
+        
+    def load_config(self) -> Dict:
+        """Load configuration"""
+        config_dir = Path.home() / '.deepseek-copier'
+        config_file = config_dir / 'config.json'
+        
+        if config_file.exists():
+            return json.loads(config_file.read_text())
+        
+        return {
+            'default_ide': 'auto',  # auto-detect or specific IDE
+            'auto_insert': True,
+            'save_history': True,
+            'history_limit': 100
+        }
+    
+    def save_config(self):
+        """Save configuration"""
+        config_dir = Path.home() / '.deepseek-copier'
+        config_dir.mkdir(exist_ok=True)
+        config_file = config_dir / 'config.json'
+        config_file.write_text(json.dumps(self.config, indent=2))
+    
+    def handle_copy(self, data: Dict) -> Dict:
+        """Handle copy request"""
+        result = {
+            'status': 'success',
+            'detected_ides': self.ide_detector.list_available_ides(),
+            'active_ide': self.ide_detector.detect_active_ide()
+        }
+        
+        # Determine target IDE
+        target_ide = self.config.get('default_ide', 'auto')
+        if target_ide == 'auto':
+            target_ide = self.ide_detector.detect_active_ide()
+        
+        result['target_ide'] = target_ide
+        
+        # Handle different data types
+        if data.get('type') == 'full_chat':
+            self.handle_full_chat(data, target_ide)
+        elif data.get('type') == 'message':
+            self.handle_message(data, target_ide)
+        elif data.get('type') == 'all_code':
+            self.handle_all_code(data, target_ide)
+        elif data.get('type') == 'markdown':
+            self.handle_markdown(data, target_ide)
+        else:
+            self.handle_single_code(data, target_ide)
+        
+        # Save to history
+        if self.config.get('save_history', True):
+            self.save_history(data)
+        
+        return result
+    
+    def handle_full_chat(self, data: Dict, target_ide: str):
+        """Handle full chat export"""
+        # Create markdown file
+        markdown = self.convert_chat_to_markdown(data)
+        filename = f"deepseek-chat-{int(time.time())}.md"
+        
+        # Save to temp directory
+        temp_dir = Path.home() / '.deepseek-copier' / 'temp'
+        temp_dir.mkdir(exist_ok=True)
+        file_path = temp_dir / filename
+        file_path.write_text(markdown)
+        
+        # Open in IDE
+        self.open_file_in_ide(file_path, target_ide)
+        
+        # Copy to clipboard
+        pyperclip.copy(markdown)
+    
+    def handle_message(self, data: Dict, target_ide: str):
+        """Handle single message"""
+        content = data.get('content', '')
+        code_blocks = data.get('codeBlocks', [])
+        
+        # If has code blocks, handle them
+        if code_blocks:
+            for block in code_blocks:
+                self.handle_single_code(block, target_ide)
+        else:
+            # Just copy text
+            pyperclip.copy(content)
+            
+            # Try to insert at cursor in active IDE
+            if self.config.get('auto_insert', True):
+                self.insert_text_in_ide(content, target_ide)
+    
+    def handle_all_code(self, data: Dict, target_ide: str):
+        """Handle all code blocks"""
+        blocks = data.get('blocks', [])
+        
+        if not blocks:
+            return
+        
+        # Create combined file
+        content = ""
+        for i, block in enumerate(blocks):
+            content += f"// Block {i + 1} ({block['language']})\n"
+            content += block['code']
+            content += "\n\n"
+        
+        # Save to file
+        temp_dir = Path.home() / '.deepseek-copier' / 'temp'
+        temp_dir.mkdir(exist_ok=True)
+        file_path = temp_dir / f"all-code-{int(time.time())}.txt"
+        file_path.write_text(content)
+        
+        # Open in IDE
+        self.open_file_in_ide(file_path, target_ide)
+        
+        # Copy first block to clipboard
+        if blocks:
+            pyperclip.copy(blocks[0]['code'])
+    
+    def handle_markdown(self, data: Dict, target_ide: str):
+        """Handle markdown export"""
+        content = data.get('content', '')
+        filename = data.get('filename', f"deepseek-{int(time.time())}.md")
+        
+        # Save to file
+        temp_dir = Path.home() / '.deepseek-copier' / 'temp'
+        temp_dir.mkdir(exist_ok=True)
+        file_path = temp_dir / filename
+        file_path.write_text(content)
+        
+        # Open in IDE
+        self.open_file_in_ide(file_path, target_ide)
+        
+        # Copy to clipboard
+        pyperclip.copy(content)
+    
+    def handle_single_code(self, data: Dict, target_ide: str):
+        """Handle single code block"""
+        code = data.get('code', '')
+        language = data.get('language', 'text')
+        
+        # Copy to clipboard
+        pyperclip.copy(code)
+        
+        # Create file for the code
+        extension = self.get_file_extension(language)
+        temp_dir = Path.home() / '.deepseek-copier' / 'temp'
+        temp_dir.mkdir(exist_ok=True)
+        file_path = temp_dir / f"snippet-{int(time.time())}.{extension}"
+        file_path.write_text(code)
+        
+        # Open in IDE
+        self.open_file_in_ide(file_path, target_ide)
+    
+    def open_file_in_ide(self, file_path: Path, target_ide: str):
+        """Open file in specified IDE"""
+        if not target_ide or target_ide == 'auto':
+            target_ide = self.ide_detector.detect_active_ide()
+        
+        if not target_ide:
+            print("⚠️ No IDE detected. File saved to:", file_path)
+            return
+        
+        ide_info = self.ide_detector.get_ide_info(target_ide)
+        if not ide_info:
+            print(f"⚠️ Unknown IDE: {target_ide}")
+            return
+        
+        try:
+            if ide_info['type'] == 'vscode':
+                subprocess.Popen([ide_info['command'], str(file_path)])
+            elif ide_info['type'] == 'jetbrains':
+                if 'launcher' in ide_info:
+                    subprocess.Popen([ide_info['launcher'], str(file_path)])
+                else:
+                    subprocess.Popen([ide_info['command'], str(file_path)])
+            elif ide_info['type'] == 'sublime':
+                subprocess.Popen([ide_info['command'], str(file_path)])
+            elif ide_info['type'] == 'atom':
+                subprocess.Popen(['atom', str(file_path)])
+            
+            print(f"✅ Opened in {ide_info['name']}")
+        except Exception as e:
+            print(f"❌ Failed to open in IDE: {e}")
+    
+    def insert_text_in_ide(self, text: str, target_ide: str):
+        """Insert text at cursor position in IDE"""
+        # This requires IDE-specific APIs or clipboard simulation
+        # For now, just ensure text is in clipboard
+        pyperclip.copy(text)
+        
+        # Simulate paste command based on OS
+        system = platform.system()
+        if system == 'Darwin':
+            subprocess.run(['osascript', '-e', 'tell application "System Events" to keystroke "v" using command down'])
+        elif system == 'Windows':
+            # Would require pyautogui or similar
+            pass
+        elif system == 'Linux':
+            subprocess.run(['xdotool', 'key', 'ctrl+v'])
+    
+    def convert_chat_to_markdown(self, chat_data: Dict) -> str:
+        """Convert chat data to markdown"""
+        markdown = f"# {chat_data.get('title', 'DeepSeek Chat')}\n\n"
+        markdown += f"> Exported: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        markdown += f"> URL: {chat_data.get('url', '')}\n\n"
+        markdown += "---\n\n"
+        
+        messages = chat_data.get('messages', [])
+        for i, message in enumerate(messages):
+            role = "🧑 User" if message.get('role') == 'user' else "🤖 Assistant"
+            markdown += f"## {role} (Message {i + 1})\n\n"
+            markdown += f"{message.get('content', '')}\n\n"
+            
+            code_blocks = message.get('codeBlocks', [])
+            for j, block in enumerate(code_blocks):
+                markdown += f"### Code Block {j + 1}\n\n"
+                markdown += f"```{block.get('language', 'text')}\n{block.get('code', '')}\n```\n\n"
+            
+            markdown += "---\n\n"
+        
+        return markdown
+    
+    def get_file_extension(self, language: str) -> str:
+        """Get file extension for language"""
+        extensions = {
+            'python': 'py',
+            'javascript': 'js',
+            'typescript': 'ts',
+            'java': 'java',
+            'cpp': 'cpp',
+            'c': 'c',
+            'csharp': 'cs',
+            'html': 'html',
+            'css': 'css',
+            'json': 'json',
+            'markdown': 'md',
+            'sql': 'sql',
+            'bash': 'sh',
+            'shell': 'sh',
+            'yaml': 'yml',
+            'xml': 'xml',
+            'rust': 'rs',
+            'go': 'go',
+            'ruby': 'rb',
+            'php': 'php',
+            'swift': 'swift',
+            'kotlin': 'kt',
+            'scala': 'scala',
+            'r': 'r',
+            'perl': 'pl',
+            'lua': 'lua',
+            'dart': 'dart',
+        }
+        return extensions.get(language.lower(), 'txt')
+    
+    def save_history(self, data: Dict):
+        """Save to history"""
+        self.history.append({
+            'timestamp': time.time(),
+            'type': data.get('type', 'code'),
+            'data': data
+        })
+        
+        # Limit history size
+        limit = self.config.get('history_limit', 100)
+        if len(self.history) > limit:
+            self.history = self.history[-limit:]
+
+class CopyHandler(BaseHTTPRequestHandler):
+    server_instance = None
+    
+    def do_POST(self):
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length)
+        
+        try:
+            data = json.loads(post_data.decode('utf-8'))
+            result = self.server_instance.handle_copy(data)
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                'status': 'error',
+                'message': str(e)
+            }).encode())
+    
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+    
+    def do_GET(self):
+        if self.path == '/status':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            status = {
+                'status': 'running',
+                'ides': self.server_instance.ide_detector.list_available_ides(),
+                'active_ide': self.server_instance.ide_detector.detect_active_ide(),
+                'history_count': len(self.server_instance.history)
+            }
+            self.wfile.write(json.dumps(status).encode())
+        elif self.path == '/config':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(self.server_instance.config).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+def main():
+    # Initialize server
+    deepseek_server = DeepSeekServer()
+    CopyHandler.server_instance = deepseek_server
+    
+    server = HTTPServer(('localhost', 8765), CopyHandler)
+    
+    print("🚀 DeepSeek Copier Server")
+    print("=" * 50)
+    print(f"📡 Server: http://localhost:8765")
+    print(f"💻 Detected IDEs: {len(deepseek_server.ide_detector.ides)}")
+    
+    for ide_id, ide_info in deepseek_server.ide_detector.ides.items():
+        print(f"  - {ide_info['name']} ({ide_id})")
+    
+    print("\n📋 Ready to receive content from DeepSeek!")
+    print("Press Ctrl+C to stop\n")
+    
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n👋 Server stopped")
+        server.shutdown()
+
+if __name__ == '__main__':
+    main()
+4. Configuration File Example
+config.json
+
+json
+{
+  "default_ide": "auto",
+  "auto_insert": true,
+  "save_history": true,
+  "history_limit": 100,
+  "file_handling": {
+    "create_files": true,
+    "open_in_ide": true,
+    "save_directory": "~/.deepseek-copier/temp"
+  },
+  "ide_preferences": {
+    "vscode": {
+      "insert_at_cursor": true,
+      "format_on_insert": true
+    },
+    "pycharm": {
+      "insert_at_cursor": true,
+      "reformat_code": true
+    }
+  },
+  "notifications": {
+    "show_desktop_notifications": true,
+    "play_sound": false
+  }
+}
+5. Popup Interface (popup.html)
+html
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            width: 350px;
+            padding: 15px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .header h2 {
+            margin: 0;
+            color: #333;
+        }
+        
+        .header p {
+            margin: 5px 0 0;
+            color: #666;
+            font-size: 12px;
+        }
+        
+        .status {
+            background: #f0f0f0;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+        }
+        
+        .status-label {
+            font-weight: 600;
+            color: #555;
+        }
+        
+        .status-value {
+            color: #2196F3;
+        }
+        
+        .actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        button {
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        
+        button:hover {
+            transform: scale(1.02);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        
+        .primary-btn {
+            background: #2196F3;
+            color: white;
+        }
+        
+        .secondary-btn {
+            background: #f0f0f0;
+            color: #333;
+        }
+        
+        .success-btn {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        .settings {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-top: 5px;
+        }
+        
+        label {
+            font-size: 12px;
+            color: #666;
+            display: block;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>🚀 DeepSeek Copier</h2>
+        <p>Copy chat content to your IDE</p>
+    </div>
+    
+    <div class="status" id="status">
+        <div class="status-item">
+            <span class="status-label">Server:</span>
+            <span class="status-value" id="serverStatus">Checking...</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">Active IDE:</span>
+            <span class="status-value" id="activeIDE">Detecting...</span>
+        </div>
+        <div class="status-item">
+            <span class="status-label">Detected IDEs:</span>
+            <span class="status-value" id="ideCount">0</span>
+        </div>
+    </div>
+    
+    <div class="actions">
+        <button class="primary-btn" id="copyFullChat">📄 Copy Full Chat</button>
+        <button class="success-btn" id="copyLastResponse">📋 Copy Last Response</button>
+        <button class="primary-btn" id="copyAllCode">💻 Copy All Code Blocks</button>
+        <button class="secondary-btn" id="exportMarkdown">📝 Export as Markdown</button>
+    </div>
+    
+    <div class="settings">
+        <label for="ideSelect">Target IDE:</label>
+        <select id="ideSelect">
+            <option value="auto">Auto-detect</option>
+            <option value="vscode">Visual Studio Code</option>
+            <option value="pycharm">PyCharm</option>
+            <option value="intellij">IntelliJ IDEA</option>
+            <option value="sublime">Sublime Text</option>
+            <option value="atom">Atom</option>
+        </select>
+    </div>
+    
+    <script src="popup.js"></script>
+</body>
+</html>
+popup.js
+
+javascript
+// Popup script
+document.addEventListener('DOMContentLoaded', async () => {
+    // Load server status
+    await updateStatus();
+    
+    // Set up button handlers
+    document.getElementById('copyFullChat').addEventListener('click', () => {
+        chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+            chrome.tabs.sendMessage(tabs[0].id, {action: 'copyFullChat'});
+        });
+    });
+    
+    document.getElementById('copyLastResponse').addEventListener('click', () => {
+        chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+            chrome.tabs.sendMessage(tabs[0].id, {action: 'copyLastResponse'});
+        });
+    });
+    
+    document.getElementById('copyAllCode').addEventListener('click', () => {
+        chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+            chrome.tabs.sendMessage(tabs[0].id, {action: 'copyAllCode'});
+        });
+    });
+    
+    document.getElementById('exportMarkdown').addEventListener('click', () => {
+        chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
+            chrome.tabs.sendMessage(tabs[0].id, {action: 'exportMarkdown'});
+        });
+    });
+    
+    // IDE selection
+    document.getElementById('ideSelect').addEventListener('change', (e) => {
+        const ide = e.target.value;
+        chrome.storage.sync.set({defaultIde: ide});
+        updateStatus();
+    });
+    
+    // Load saved IDE preference
+    chrome.storage.sync.get(['defaultIde'], (result) => {
+        if (result.defaultIde) {
+            document.getElementById('ideSelect').value = result.defaultIde;
+        }
+    });
+});
+
+async function updateStatus() {
+    try {
+        const response = await fetch('http://localhost:8765/status');
+        const status = await response.json();
+        
+        document.getElementById('serverStatus').textContent = '✅ Running';
+        document.getElementById('serverStatus').style.color = '#4CAF50';
+        
+        const activeIde = status.active_ide || 'None detected';
+        document.getElementById('activeIDE').textContent = activeIde;
+        
+        document.getElementById('ideCount').textContent = status.ides.length;
+        
+        // Update IDE selector with detected IDEs
+        const select = document.getElementById('ideSelect');
+        status.ides.forEach(ide => {
+            const option = document.createElement('option');
+            option.value = ide.id;
+            option.textContent = ide.name;
+            select.appendChild(option);
+        });
+    } catch (error) {
+        document.getElementById('serverStatus').textContent = '❌ Not Running';
+        document.getElementById('serverStatus').style.color = '#f44336';
+        document.getElementById('activeIDE').textContent = 'Server offline';
+    }
+}
+
+// Update status every 5 seconds
+setInterval(updateStatus, 5000);
+Installation & Usage
+Install Python dependencies:
+
+bash
+pip install pyperclip psutil websockets pywin32  # pywin32 only for Windows
+Start the server:
+
+bash
+python server.py
+Load the browser extension:
+
+Chrome: chrome://extensions/ → Developer Mode → Load unpacked
+
+Select the extension folder
+
+Use the extension:
+
+Visit DeepSeek chat
+
+Use floating buttons or extension popup
+
+Content automatically goes to detected IDE
+
+The system now:
+
+✅ Copies full chat pages
+
+✅ Exports as Markdown
+
+✅ Detects multiple IDEs
+
+✅ Auto-detects active IDE
+
+✅ Handles code blocks intelligently
+
+✅ Maintains history
+
+✅ Configurable preferences
+
+Would you like me to add support for any specific IDE or add more features like automatic file creation based on conversation context?
+
+yes need to make it robust since its complete copy paste from chat window too ide thee question is what happens when ccode errors are rewritten ?
+Excellent question! You're right - when code has errors and gets rewritten, we need a robust system that handles versioning, error tracking, and smart updates. Let me create a comprehensive solution that manages code versions and updates intelligently.
+
+Advanced Code Version Management System
+1. Enhanced Server with Code Versioning and Error Tracking
+version_manager.py
+
+python
+import json
+import hashlib
+import difflib
+import time
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+import re
+from dataclasses import dataclass, asdict
+from enum import Enum
+
+class CodeStatus(Enum):
+    """Status of code block"""
+    ORIGINAL = "original"
+    MODIFIED = "modified"
+    ERROR = "error"
+    FIXED = "fixed"
+    OPTIMIZED = "optimized"
+    REFACTORED = "refactored"
+    DEPRECATED = "deprecated"
+
+@dataclass
+class CodeVersion:
+    """Represents a version of a code block"""
+    version_id: str
+    code: str
+    language: str
+    timestamp: float
+    status: CodeStatus
+    parent_version: Optional[str] = None
+    error_info: Optional[Dict] = None
+    change_summary: Optional[str] = None
+    hash: str = ""
+    
+    def __post_init__(self):
+        if not self.hash:
+            self.hash = hashlib.md5(self.code.encode()).hexdigest()
+    
+    def to_dict(self):
+        return asdict(self)
+
+@dataclass
+class CodeBlock:
+    """Represents a code block with version history"""
+    block_id: str
+    language: str
+    versions: List[CodeVersion]
+    current_version: str
+    file_path: Optional[Path] = None
+    context: Optional[Dict] = None
+    created_at: float = time.time()
+    updated_at: float = time.time()
+    
+    def get_current_code(self) -> str:
+        """Get current version of code"""
+        for version in self.versions:
+            if version.version_id == self.current_version:
+                return version.code
+        return self.versions[-1].code if self.versions else ""
+    
+    def add_version(self, version: CodeVersion):
+        """Add new version"""
+        self.versions.append(version)
+        self.current_version = version.version_id
+        self.updated_at = time.time()
+    
+    def get_version(self, version_id: str) -> Optional[CodeVersion]:
+        """Get specific version"""
+        for version in self.versions:
+            if version.version_id == version_id:
+                return version
+        return None
+    
+    def get_history(self) -> List[Dict]:
+        """Get version history"""
+        return [v.to_dict() for v in self.versions]
+    
+    def to_dict(self):
+        return {
+            'block_id': self.block_id,
+            'language': self.language,
+            'versions': [v.to_dict() for v in self.versions],
+            'current_version': self.current_version,
+            'file_path': str(self.file_path) if self.file_path else None,
+            'context': self.context,
+            'created_at': self.created_at,
+            'updated_at': self.updated_at
+        }
+
+class CodeVersionManager:
+    """Manages code versions and detects changes"""
+    
+    def __init__(self, storage_dir: Path):
+        self.storage_dir = storage_dir
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
+        self.blocks: Dict[str, CodeBlock] = {}
+        self.load_state()
+    
+    def load_state(self):
+        """Load saved state"""
+        state_file = self.storage_dir / 'state.json'
+        if state_file.exists():
+            try:
+                data = json.loads(state_file.read_text())
+                for block_data in data.get('blocks', []):
+                    block = self.block_from_dict(block_data)
+                    self.blocks[block.block_id] = block
+            except Exception as e:
+                print(f"Error loading state: {e}")
+    
+    def save_state(self):
+        """Save current state"""
+        state_file = self.storage_dir / 'state.json'
+        state = {
+            'blocks': [block.to_dict() for block in self.blocks.values()]
+        }
+        state_file.write_text(json.dumps(state, indent=2))
+    
+    def block_from_dict(self, data: Dict) -> CodeBlock:
+        """Create CodeBlock from dict"""
+        versions = []
+        for v_data in data['versions']:
+            version = CodeVersion(
+                version_id=v_data['version_id'],
+                code=v_data['code'],
+                language=v_data['language'],
+                timestamp=v_data['timestamp'],
+                status=CodeStatus(v_data['status']),
+                parent_version=v_data.get('parent_version'),
+                error_info=v_data.get('error_info'),
+                change_summary=v_data.get('change_summary'),
+                hash=v_data.get('hash', '')
+            )
+            versions.append(version)
+        
+        return CodeBlock(
+            block_id=data['block_id'],
+            language=data['language'],
+            versions=versions,
+            current_version=data['current_version'],
+            file_path=Path(data['file_path']) if data.get('file_path') else None,
+            context=data.get('context'),
+            created_at=data.get('created_at', time.time()),
+            updated_at=data.get('updated_at', time.time())
+        )
+    
+    def identify_block(self, code: str, language: str, context: Optional[Dict] = None) -> Optional[str]:
+        """Identify if code matches existing block"""
+        code_hash = hashlib.md5(code.encode()).hexdigest()
+        
+        # Check for exact hash match
+        for block_id, block in self.blocks.items():
+            for version in block.versions:
+                if version.hash == code_hash:
+                    return block_id
+        
+        # Check for similarity (for slightly modified code)
+        for block_id, block in self.blocks.items():
+            if block.language != language:
+                continue
+            
+            current_code = block.get_current_code()
+            similarity = self.calculate_similarity(code, current_code)
+            
+            if similarity > 0.7:  # 70% similar
+                return block_id
+        
+        return None
+    
+    def calculate_similarity(self, code1: str, code2: str) -> float:
+        """Calculate similarity between two code strings"""
+        if not code1 or not code2:
+            return 0.0
+        
+        # Use difflib for similarity
+        sequence_matcher = difflib.SequenceMatcher(None, code1, code2)
+        return sequence_matcher.ratio()
+    
+    def detect_changes(self, old_code: str, new_code: str) -> Dict:
+        """Detect and describe changes between code versions"""
+        diff = list(difflib.unified_diff(
+            old_code.splitlines(keepends=True),
+            new_code.splitlines(keepends=True),
+            fromfile='previous',
+            tofile='current',
+            n=3
+        ))
+        
+        changes = {
+            'diff': ''.join(diff),
+            'added_lines': 0,
+            'removed_lines': 0,
+            'modified_lines': 0,
+            'summary': []
+        }
+        
+        for line in diff:
+            if line.startswith('+') and not line.startswith('+++'):
+                changes['added_lines'] += 1
+            elif line.startswith('-') and not line.startswith('---'):
+                changes['removed_lines'] += 1
+        
+        # Generate summary
+        if changes['added_lines'] > 0 and changes['removed_lines'] > 0:
+            changes['summary'].append(f"Modified {changes['added_lines'] + changes['removed_lines']} lines")
+        elif changes['added_lines'] > 0:
+            changes['summary'].append(f"Added {changes['added_lines']} lines")
+        elif changes['removed_lines'] > 0:
+            changes['summary'].append(f"Removed {changes['removed_lines']} lines")
+        
+        return changes
+    
+    def detect_error_fix(self, old_code: str, new_code: str) -> bool:
+        """Detect if new code is fixing errors in old code"""
+        # Look for common error patterns
+        error_patterns = [
+            r'Error:',
+            r'Exception:',
+            r'Traceback',
+            r'TypeError',
+            r'ValueError',
+            r'AttributeError',
+            r'SyntaxError',
+            r'NameError',
+            r'IndexError',
+            r'KeyError',
+            r'RuntimeError',
+            r'ImportError'
+        ]
+        
+        old_has_errors = any(re.search(pattern, old_code) for pattern in error_patterns)
+        new_has_errors = any(re.search(pattern, new_code) for pattern in error_patterns)
+        
+        # If old code had errors and new code doesn't
+        if old_has_errors and not new_has_errors:
+            return True
+        
+        # Check for common fixes
+        fix_patterns = [
+            (r'except:', r'except Exception as e:'),  # Proper exception handling
+            (r'print\(', r'print('),  # Print statement fixes
+            (r'== None', r'is None'),  # None comparison
+            (r'!= None', r'is not None'),  # None comparison
+            (r'\.\.\.', 'pass'),  # Placeholder replacement
+        ]
+        
+        for old_pattern, new_pattern in fix_patterns:
+            if re.search(old_pattern, old_code) and re.search(new_pattern, new_code):
+                return True
+        
+        return False
+    
+    def add_or_update_block(self, code: str, language: str, context: Optional[Dict] = None, 
+                           error_info: Optional[Dict] = None) -> CodeBlock:
+        """Add new block or update existing one"""
+        block_id = self.identify_block(code, language, context)
+        
+        if block_id:
+            # Update existing block
+            block = self.blocks[block_id]
+            current_code = block.get_current_code()
+            
+            # Detect changes
+            changes = self.detect_changes(current_code, code)
+            
+            # Determine status
+            if error_info:
+                status = CodeStatus.ERROR
+            elif self.detect_error_fix(current_code, code):
+                status = CodeStatus.FIXED
+                # If fixing errors, mark old version as error
+                old_version = block.get_version(block.current_version)
+                if old_version:
+                    old_version.status = CodeStatus.ERROR
+                    old_version.error_info = {
+                        'message': 'Had errors, fixed in newer version',
+                        'timestamp': time.time()
+                    }
+            elif changes['added_lines'] > 0 and changes['removed_lines'] == 0:
+                status = CodeStatus.OPTIMIZED
+            elif len(code) < len(current_code) * 0.7:
+                status = CodeStatus.REFACTORED
+            else:
+                status = CodeStatus.MODIFIED
+            
+            # Create new version
+            version = CodeVersion(
+                version_id=f"v{len(block.versions) + 1}",
+                code=code,
+                language=language,
+                timestamp=time.time(),
+                status=status,
+                parent_version=block.current_version,
+                error_info=error_info,
+                change_summary=', '.join(changes['summary'])
+            )
+            
+            block.add_version(version)
+            
+            # Update file if exists
+            if block.file_path and block.file_path.exists():
+                block.file_path.write_text(code)
+            
+            return block
+        else:
+            # Create new block
+            block_id = hashlib.md5(f"{language}-{time.time()}".encode()).hexdigest()[:12]
+            
+            version = CodeVersion(
+                version_id="v1",
+                code=code,
+                language=language,
+                timestamp=time.time(),
+                status=CodeStatus.ORIGINAL if not error_info else CodeStatus.ERROR,
+                error_info=error_info
+            )
+            
+            block = CodeBlock(
+                block_id=block_id,
+                language=language,
+                versions=[version],
+                current_version="v1",
+                context=context
+            )
+            
+            self.blocks[block_id] = block
+            return block
+    
+    def get_block(self, block_id: str) -> Optional[CodeBlock]:
+        """Get block by ID"""
+        return self.blocks.get(block_id)
+    
+    def get_all_blocks(self) -> List[CodeBlock]:
+        """Get all blocks"""
+        return list(self.blocks.values())
+    
+    def get_blocks_by_language(self, language: str) -> List[CodeBlock]:
+        """Get blocks by language"""
+        return [block for block in self.blocks.values() if block.language == language]
+    
+    def get_recent_blocks(self, limit: int = 10) -> List[CodeBlock]:
+        """Get recently modified blocks"""
+        sorted_blocks = sorted(
+            self.blocks.values(),
+            key=lambda b: b.updated_at,
+            reverse=True
+        )
+        return sorted_blocks[:limit]
+    
+    def revert_to_version(self, block_id: str, version_id: str) -> bool:
+        """Revert block to specific version"""
+        block = self.get_block(block_id)
+        if not block:
+            return False
+        
+        version = block.get_version(version_id)
+        if not version:
+            return False
+        
+        # Create new version as revert
+        new_version = CodeVersion(
+            version_id=f"v{len(block.versions) + 1}",
+            code=version.code,
+            language=block.language,
+            timestamp=time.time(),
+            status=CodeStatus.REFACTORED,
+            parent_version=block.current_version,
+            change_summary=f"Reverted to {version_id}"
+        )
+        
+        block.add_version(new_version)
+        
+        # Update file
+        if block.file_path and block.file_path.exists():
+            block.file_path.write_text(version.code)
+        
+        return True
+    
+    def cleanup_old_versions(self, max_versions_per_block: int = 10):
+        """Clean up old versions to save space"""
+        for block in self.blocks.values():
+            if len(block.versions) > max_versions_per_block:
+                # Keep the newest versions and the original
+                kept_versions = block.versions[-max_versions_per_block:]
+                block.versions = kept_versions
+                block.current_version = kept_versions[-1].version_id
+    
+    def export_history(self, format: str = 'json') -> Path:
+        """Export version history"""
+        export_file = self.storage_dir / f'history_{int(time.time())}.{format}'
+        
+        if format == 'json':
+            data = {
+                'blocks': [block.to_dict() for block in self.blocks.values()]
+            }
+            export_file.write_text(json.dumps(data, indent=2))
+        elif format == 'markdown':
+            markdown = "# Code Version History\n\n"
+            
+            for block in self.blocks.values():
+                markdown += f"## Block {block.block_id} ({block.language})\n\n"
+                
+                for version in block.versions:
+                    markdown += f"### {version.version_id} - {version.status.value}\n"
+                    markdown += f"**Time:** {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(version.timestamp))}\n"
+                    if version.change_summary:
+                        markdown += f"**Changes:** {version.change_summary}\n"
+                    if version.error_info:
+                        markdown += f"**Errors:** {version.error_info.get('message', 'Unknown')}\n"
+                    markdown += f"\n```{block.language}\n{version.code}\n```\n\n"
+            
+            export_file.write_text(markdown)
+        
+        return export_file
+
+class ErrorTracker:
+    """Tracks and analyzes code errors"""
+    
+    def __init__(self):
+        self.error_history = []
+        self.error_patterns = {}
+    
+    def track_error(self, code: str, error_message: str, language: str):
+        """Track an error occurrence"""
+        error_entry = {
+            'timestamp': time.time(),
+            'language': language,
+            'error_message': error_message,
+            'code_snippet': code[:500]  # Store first 500 chars
+        }
+        self.error_history.append(error_entry)
+        
+        # Track error patterns
+        error_type = self.classify_error(error_message)
+        if error_type not in self.error_patterns:
+            self.error_patterns[error_type] = {
+                'count': 0,
+                'examples': [],
+                'fixes': []
+            }
+        
+        self.error_patterns[error_type]['count'] += 1
+        if len(self.error_patterns[error_type]['examples']) < 5:
+            self.error_patterns[error_type]['examples'].append({
+                'error': error_message,
+                'code': code[:200]
+            })
+    
+    def classify_error(self, error_message: str) -> str:
+        """Classify error type"""
+        error_types = {
+            'syntax_error': r'SyntaxError|syntax error',
+            'type_error': r'TypeError|type error',
+            'value_error': r'ValueError|value error',
+            'attribute_error': r'AttributeError|attribute error',
+            'name_error': r'NameError|name error|undefined',
+            'index_error': r'IndexError|index error',
+            'key_error': r'KeyError|key error',
+            'import_error': r'ImportError|module not found|import error',
+            'runtime_error': r'RuntimeError|runtime error',
+            'indentation_error': r'IndentationError|indentation error',
+            'zero_division': r'ZeroDivisionError|division by zero',
+            'file_not_found': r'FileNotFoundError|no such file',
+            'permission_error': r'PermissionError|permission denied'
+        }
+        
+        for error_type, pattern in error_types.items():
+            if re.search(pattern, error_message, re.IGNORECASE):
+                return error_type
+        
+        return 'unknown_error'
+    
+    def suggest_fix(self, error_type: str, code: str, language: str) -> Optional[str]:
+        """Suggest fix for common errors"""
+        suggestions = {
+            'syntax_error': "Check for missing colons, parentheses, or brackets",
+            'type_error': "Verify variable types and ensure proper type conversion",
+            'value_error': "Check if the value is within acceptable range",
+            'attribute_error': "Verify that the attribute exists on the object",
+            'name_error': "Check if the variable is defined before use",
+            'index_error': "Ensure the index is within bounds of the list/array",
+            'key_error': "Check if the key exists in the dictionary",
+            'import_error': "Verify the module is installed and path is correct",
+            'indentation_error': "Check for consistent indentation (tabs vs spaces)",
+            'zero_division': "Add a check for zero before division",
+            'file_not_found': "Verify the file path and that the file exists",
+            'permission_error': "Check file permissions or run with appropriate privileges"
+        }
+        
+        return suggestions.get(error_type)
+    
+    def get_error_statistics(self) -> Dict:
+        """Get error statistics"""
+        return {
+            'total_errors': len(self.error_history),
+            'error_types': self.error_patterns,
+            'recent_errors': self.error_history[-10:]
+        }
+2. Enhanced Server with Smart Update Handling
+smart_server.py
+
+python
+import json
+import time
+from pathlib import Path
+from typing import Dict, Optional
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
+from version_manager import CodeVersionManager, ErrorTracker, CodeStatus
+import pyperclip
+
+class SmartDeepSeekServer:
+    def __init__(self):
+        self.storage_dir = Path.home() / '.deepseek-copier'
+        self.storage_dir.mkdir(exist_ok=True)
+        
+        self.version_manager = CodeVersionManager(self.storage_dir / 'versions')
+        self.error_tracker = ErrorTracker()
+        
+        self.current_context = {}
+        self.active_file = None
+        
+        # Load configuration
+        self.config = self.load_config()
+    
+    def load_config(self) -> Dict:
+        """Load configuration"""
+        config_file = self.storage_dir / 'config.json'
+        if config_file.exists():
+            return json.loads(config_file.read_text())
+        
+        return {
+            'auto_create_files': True,
+            'track_versions': True,
+            'detect_errors': True,
+            'auto_fix_errors': False,
+            'max_versions': 10,
+            'file_extensions': {
+                'python': 'py',
+                'javascript': 'js',
+                'typescript': 'ts',
+                'java': 'java',
+                'cpp': 'cpp',
+                'html': 'html',
+                'css': 'css'
+            }
+        }
+    
+    def handle_code_update(self, code: str, language: str, context: Optional[Dict] = None,
+                          error_info: Optional[Dict] = None) -> Dict:
+        """Handle code update with version tracking"""
+        result = {
+            'status': 'success',
+            'action': 'created',
+            'block_id': None,
+            'version': None,
+            'changes': None,
+            'error_detected': False,
+            'suggestions': []
+        }
+        
+        # Track errors if present
+        if error_info and self.config.get('detect_errors', True):
+            self.error_tracker.track_error(code, error_info.get('message', ''), language)
+            result['error_detected'] = True
+            
+            # Get fix suggestions
+            error_type = self.error_tracker.classify_error(error_info.get('message', ''))
+            suggestion = self.error_tracker.suggest_fix(error_type, code, language)
+            if suggestion:
+                result['suggestions'].append(suggestion)
+        
+        # Update version manager
+        if self.config.get('track_versions', True):
+            block = self.version_manager.add_or_update_block(
+                code, language, context, error_info
+            )
+            result['block_id'] = block.block_id
+            result['version'] = block.current_version
+            
+            # Check if this is an update
+            if len(block.versions) > 1:
+                result['action'] = 'updated'
+                
+                # Get changes
+                old_version = block.get_version(block.versions[-2].version_id)
+                changes = self.version_manager.detect_changes(old_version.code, code)
+                result['changes'] = changes
+                
+                # Check if error fix
+                if block.versions[-1].status == CodeStatus.FIXED:
+                    result['action'] = 'error_fixed'
+        
+        # Create file if needed
+        if self.config.get('auto_create_files', True) and not error_info:
+            file_path = self.create_code_file(code, language, result.get('block_id'))
+            result['file_path'] = str(file_path)
+            
+            # Update block with file path
+            if result.get('block_id'):
+                block = self.version_manager.get_block(result['block_id'])
+                if block:
+                    block.file_path = file_path
+        
+        # Copy to clipboard
+        pyperclip.copy(code)
+        
+        return result
+    
+    def create_code_file(self, code: str, language: str, block_id: Optional[str] = None) -> Path:
+        """Create file for code"""
+        extension = self.config['file_extensions'].get(language, 'txt')
+        
+        # Create project structure based on context
+        project_dir = self.storage_dir / 'projects'
+        
+        if block_id:
+            file_dir = project_dir / block_id
+        else:
+            file_dir = project_dir / f"snippet-{int(time.time())}"
+        
+        file_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Determine filename
+        if language == 'python':
+            filename = 'main.py'
+        elif language == 'javascript':
+            filename = 'index.js'
+        elif language == 'typescript':
+            filename = 'index.ts'
+        elif language == 'html':
+            filename = 'index.html'
+        elif language == 'css':
+            filename = 'style.css'
+        else:
+            filename = f"code.{extension}"
+        
+        file_path = file_dir / filename
+        file_path.write_text(code)
+        
+        return file_path
+    
+    def handle_full_chat(self, chat_data: Dict) -> Dict:
+        """Handle full chat with all code blocks"""
+        result = {
+            'status': 'success',
+            'blocks_processed': 0,
+            'blocks_updated': 0,
+            'blocks_created': 0,
+            'error_fixes': 0,
+            'project_files': []
+        }
+        
+        messages = chat_data.get('messages', [])
+        
+        for message in messages:
+            code_blocks = message.get('codeBlocks', [])
+            
+            for block in code_blocks:
+                context = {
+                    'message_id': message.get('id'),
+                    'role': message.get('role'),
+                    'content': message.get('content', '')[:500]  # Context snippet
+                }
+                
+                # Check for error mentions in content
+                error_info = None
+                if self.contains_error_indicators(message.get('content', '')):
+                    error_info = {
+                        'message': self.extract_error_message(message.get('content', '')),
+                        'context': message.get('content', '')[:500]
+                    }
+                
+                update_result = self.handle_code_update(
+                    block.get('code', ''),
+                    block.get('language', 'text'),
+                    context,
+                    error_info
+                )
+                
+                result['blocks_processed'] += 1
+                
+                if update_result['action'] == 'updated':
+                    result['blocks_updated'] += 1
+                elif update_result['action'] == 'error_fixed':
+                    result['error_fixes'] += 1
+                elif update_result['action'] == 'created':
+                    result['blocks_created'] += 1
+                
+                if 'file_path' in update_result:
+                    result['project_files'].append(update_result['file_path'])
+        
+        return result
+    
+    def contains_error_indicators(self, text: str) -> bool:
+        """Check if text contains error indicators"""
+        error_patterns = [
+            r'error',
+            r'Error',
+            r'exception',
+            r'Exception',
+            r'traceback',
+            r'Traceback',
+            r'failed',
+            r'Failed',
+            r'bug',
+            r'Bug',
+            r'issue',
+            r'Issue',
+            r'problem',
+            r'Problem',
+            r'not working',
+            r'doesn\'t work',
+            r'fix',
+            r'Fix'
+        ]
+        
+        return any(re.search(pattern, text) for pattern in error_patterns)
+    
+    def extract_error_message(self, text: str) -> str:
+        """Extract error message from text"""
+        # Look for common error patterns
+        patterns = [
+            r'(?:Error|Exception|Traceback)[:\s]+(.+?)(?:\n|$)',
+            r'(?:error|exception)[:\s]+(.+?)(?:\n|$)',
+            r'Failed[:\s]+(.+?)(?:\n|$)',
+            r'Error:\s*(.+?)(?:\n|$)'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        
+        return "Unknown error"
+    
+    def get_version_history(self, block_id: Optional[str] = None) -> Dict:
+        """Get version history"""
+        if block_id:
+            block = self.version_manager.get_block(block_id)
+            if block:
+                return {
+                    'status': 'success',
+                    'block': block.to_dict()
+                }
+            return {'status': 'error', 'message': 'Block not found'}
+        
+        return {
+            'status': 'success',
+            'blocks': [block.to_dict() for block in self.version_manager.get_all_blocks()]
+        }
+    
+    def revert_version(self, block_id: str, version_id: str) -> Dict:
+        """Revert to previous version"""
+        success = self.version_manager.revert_to_version(block_id, version_id)
+        
+        if success:
+            block = self.version_manager.get_block(block_id)
+            if block:
+                # Copy reverted code to clipboard
+                pyperclip.copy(block.get_current_code())
+                
+                return {
+                    'status': 'success',
+                    'message': f'Reverted to version {version_id}',
+                    'current_version': block.current_version
+                }
+        
+        return {'status': 'error', 'message': 'Failed to revert'}
+    
+    def get_error_statistics(self) -> Dict:
+        """Get error statistics"""
+        stats = self.error_tracker.get_error_statistics()
+        stats['status'] = 'success'
+        return stats
+3. API Handler with Smart Updates
+smart_api_handler.py
+
+python
+import json
+from http.server import BaseHTTPRequestHandler
+from typing import Dict
+import re
+
+class SmartAPIHandler(BaseHTTPRequestHandler):
+    server_instance = None
+    
+    def do_POST(self):
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length)
+        
+        try:
+            data = json.loads(post_data.decode('utf-8'))
+            
+            if self.path == '/code/update':
+                result = self.server_instance.handle_code_update(
+                    data.get('code', ''),
+                    data.get('language', 'text'),
+                    data.get('context'),
+                    data.get('error_info')
+                )
+            elif self.path == '/chat/full':
+                result = self.server_instance.handle_full_chat(data)
+            elif self.path == '/version/revert':
+                result = self.server_instance.revert_version(
+                    data.get('block_id'),
+                    data.get('version_id')
+                )
+            else:
+                result = {'status': 'error', 'message': 'Unknown endpoint'}
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                'status': 'error',
+                'message': str(e)
+            }).encode())
+    
+    def do_GET(self):
+        if self.path.startswith('/versions'):
+            # Parse query parameters
+            query = self.path.split('?', 1)
+            params = {}
+            if len(query) > 1:
+                for param in query[1].split('&'):
+                    if '=' in param:
+                        key, value = param.split('=', 1)
+                        params[key] = value
+            
+            block_id = params.get('block_id')
+            result = self.server_instance.get_version_history(block_id)
+            
+        elif self.path == '/errors/stats':
+            result = self.server_instance.get_error_statistics()
+        else:
+            result = {'status': 'error', 'message': 'Unknown endpoint'}
+        
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps(result).encode())
+4. Enhanced Browser Extension with Error Detection
+smart_content.js
+
+javascript
+class SmartDeepSeekExtractor {
+    constructor() {
+        this.versionManager = new VersionManager();
+        this.errorDetector = new ErrorDetector();
+        this.init();
+    }
+    
+    init() {
+        this.setupUI();
+        this.setupObserver();
+        this.setupMessageListener();
+    }
+    
+    setupMessageListener() {
+        chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+            switch (request.action) {
+                case 'copyFullChat':
+                    this.copyFullChatWithTracking();
+                    break;
+                case 'copyLastResponse':
+                    this.copyLastResponseWithTracking();
+                    break;
+                case 'copyAllCode':
+                    this.copyAllCodeWithTracking();
+                    break;
+                case 'getVersionHistory':
+                    this.getVersionHistory(request.blockId);
+                    break;
+                case 'revertVersion':
+                    this.revertVersion(request.blockId, request.versionId);
+                    break;
+            }
+            return true;
+        });
+    }
+    
+    copyFullChatWithTracking() {
+        const chatData = this.extractFullChat();
+        
+        // Track all code blocks
+        chatData.messages.forEach(message => {
+            message.codeBlocks.forEach(block => {
+                const errorInfo = this.errorDetector.detectError(message.content);
+                this.versionManager.trackCode(block, errorInfo);
+            });
+        });
+        
+        // Send to server
+        this.sendToServer({
+            type: 'full_chat',
+            ...chatData,
+            version_tracking: true
+        });
+    }
+    
+    copyLastResponseWithTracking() {
+        const messages = this.extractAllMessages();
+        if (messages.length > 0) {
+            const lastMessage = messages[messages.length - 1];
+            
+            // Detect errors in message
+            const errorInfo = this.errorDetector.detectError(lastMessage.content);
+            
+            this.sendToServer({
+                type: 'message',
+                ...lastMessage,
+                error_info: errorInfo
+            });
+        }
+    }
+    
+    copyAllCodeWithTracking() {
+        const codeBlocks = this.extractAllCodeBlocks();
+        const messages = this.extractAllMessages();
+        
+        // Match code blocks with context
+        const blocksWithContext = codeBlocks.map(block => {
+            const context = this.findBlockContext(block, messages);
+            const errorInfo = this.errorDetector.detectError(context?.content || '');
+            
+            return {
+                ...block,
+                context: context,
+                error_info: errorInfo
+            };
+        });
+        
+        this.sendToServer({
+            type: 'all_code',
+            blocks: blocksWithContext
+        });
+    }
+    
+    findBlockContext(codeBlock, messages) {
+        // Find which message contains this code block
+        for (const message of messages) {
+            if (message.codeBlocks.some(b => b.code === codeBlock.code)) {
+                return {
+                    message_id: message.id,
+                    role: message.role,
+                    content: message.content
+                };
+            }
+        }
+        return null;
+    }
+    
+    async sendToServer(data) {
+        try {
+            const response = await fetch('http://localhost:8765/code/update', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const result = await response.json();
+            
+            // Show notification with version info
+            if (result.version) {
+                this.showNotification(`✅ Code ${result.version} saved (${result.action})`);
+            }
+            
+            // Show error suggestions if any
+            if (result.suggestions && result.suggestions.length > 0) {
+                this.showSuggestions(result.suggestions);
+            }
+            
+            return result;
+        } catch (error) {
+            console.error('Error sending to server:', error);
+            this.showNotification('❌ Failed to send code');
+        }
+    }
+    
+    showSuggestions(suggestions) {
+        const container = document.createElement('div');
+        container.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 5px;
+            padding: 15px;
+            z-index: 999999;
+            max-width: 300px;
+        `;
+        
+        const title = document.createElement('div');
+        title.textContent = '💡 Fix Suggestions:';
+        title.style.fontWeight = 'bold';
+        title.style.marginBottom = '10px';
+        container.appendChild(title);
+        
+        suggestions.forEach(suggestion => {
+            const suggestionEl = document.createElement('div');
+            suggestionEl.textContent = `• ${suggestion}`;
+            suggestionEl.style.margin = '5px 0';
+            container.appendChild(suggestionEl);
+        });
+        
+        document.body.appendChild(container);
+        
+        setTimeout(() => {
+            container.remove();
+        }, 10000);
+    }
+}
+
+class VersionManager {
+    constructor() {
+        this.versions = new Map();
+        this.loadState();
+    }
+    
+    loadState() {
+        chrome.storage.local.get(['codeVersions'], (result) => {
+            if (result.codeVersions) {
+                this.versions = new Map(Object.entries(result.codeVersions));
+            }
+        });
+    }
+    
+    saveState() {
+        const data = Object.fromEntries(this.versions);
+        chrome.storage.local.set({codeVersions: data});
+    }
+    
+    trackCode(codeBlock, errorInfo = null) {
+        const hash = this.hashCode(codeBlock.code);
+        const existing = this.versions.get(hash);
+        
+        if (existing) {
+            // Update version
+            existing.versions.push({
+                timestamp: Date.now(),
+                code: codeBlock.code,
+                errorInfo: errorInfo,
+                version: existing.versions.length + 1
+            });
+        } else {
+            // New code block
+            this.versions.set(hash, {
+                blockId: hash,
+                language: codeBlock.language,
+                versions: [{
+                    timestamp: Date.now(),
+                    code: codeBlock.code,
+                    errorInfo: errorInfo,
+                    version: 1
+                }]
+            });
+        }
+        
+        this.saveState();
+    }
+    
+    hashCode(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        return hash.toString(36);
+    }
+}
+
+class ErrorDetector {
+    detectError(text) {
+        if (!text) return null;
+        
+        const errorPatterns = [
+            /Error:/,
+            /Exception:/,
+            /Traceback/,
+            /TypeError/,
+            /ValueError/,
+            /AttributeError/,
+            /SyntaxError/,
+            /NameError/,
+            /IndexError/,
+            /KeyError/,
+            /RuntimeError/,
+            /ImportError/,
+            /not working/,
+            /doesn't work/,
+            /failed/,
+            /bug/,
+            /issue/
+        ];
+        
+        for (const pattern of errorPatterns) {
+            if (pattern.test(text)) {
+                return {
+                    message: this.extractErrorMessage(text),
+                    pattern: pattern.source,
+                    timestamp: Date.now()
+                };
+            }
+        }
+        
+        return null;
+    }
+    
+    extractErrorMessage(text) {
+        const patterns = [
+            /(?:Error|Exception|Traceback)[:\s]+(.+?)(?:\n|$)/i,
+            /(?:error|exception)[:\s]+(.+?)(?:\n|$)/i,
+            /Failed[:\s]+(.+?)(?:\n|$)/i
+        ];
+        
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (match) {
+                return match[1].trim();
+            }
+        }
+        
+        return "Unknown error";
+    }
+}
+
+// Initialize
+const smartExtractor = new SmartDeepSeekExtractor();
+5. Version History Viewer
+version_viewer.html
+
+html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Code Version History</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .block-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .block-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .block-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        .version-timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .version-item {
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 4px;
+        }
+        
+        .version-item.current {
+            background: #e3f2fd;
+            border-left: 4px solid #2196F3;
+        }
+        
+        .version-item.error {
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+        }
+        
+        .version-item.fixed {
+            background: #e8f5e9;
+            border-left: 4px solid #4CAF50;
+        }
+        
+        .diff-view {
+            font-family: monospace;
+            white-space: pre-wrap;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        
+        .added {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        
+        .removed {
+            background: #ffebee;
+            color: #c62828;
+        }
+        
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            flex: 1;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2196F3;
+        }
+        
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📚 Code Version History</h1>
+            <div class="stats" id="stats">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalBlocks">0</div>
+                    <div class="stat-label">Total Blocks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="totalVersions">0</div>
+                    <div class="stat-label">Total Versions</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="errorFixes">0</div>
+                    <div class="stat-label">Error Fixes</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="activeBlocks">0</div>
+                    <div class="stat-label">Active Blocks</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="block-list" id="blockList">
+            <!-- Blocks will be rendered here -->
+        </div>
+    </div>
+    
+    <script src="version_viewer.js"></script>
+</body>
+</html>
+version_viewer.js
+
+javascript
+class VersionViewer {
+    constructor() {
+        this.blocks = [];
+        this.loadVersions();
+    }
+    
+    async loadVersions() {
+        try {
+            const response = await fetch('http://localhost:8765/versions');
+            const data = await response.json();
+            
+            if (data.status === 'success') {
+                this.blocks = data.blocks || [];
+                this.render();
+            }
+        } catch (error) {
+            console.error('Failed to load versions:', error);
+            document.getElementById('blockList').innerHTML = 
+                '<div class="error">Failed to connect to server</div>';
+        }
+    }
+    
+    render() {
+        this.renderStats();
+        this.renderBlockList();
+    }
+    
+    renderStats() {
+        const totalBlocks = this.blocks.length;
+        const totalVersions = this.blocks.reduce((sum, block) => 
+            sum + block.versions.length, 0);
+        const errorFixes = this.blocks.reduce((sum, block) => 
+            sum + block.versions.filter(v => v.status === 'fixed').length, 0);
+        const activeBlocks = this.blocks.filter(block => 
+            block.versions[block.versions.length - 1].status !== 'deprecated'
+        ).length;
+        
+        document.getElementById('totalBlocks').textContent = totalBlocks;
+        document.getElementById('totalVersions').textContent = totalVersions;
+        document.getElementById('errorFixes').textContent = errorFixes;
+        document.getElementById('activeBlocks').textContent = activeBlocks;
+    }
+    
+    renderBlockList() {
+        const blockList = document.getElementById('blockList');
+        blockList.innerHTML = '';
+        
+        this.blocks.forEach(block => {
+            const card = document.createElement('div');
+            card.className = 'block-card';
+            
+            const currentVersion = block.versions[block.versions.length - 1];
+            const statusClass = currentVersion.status;
+            
+            card.innerHTML = `
+                <h3>${block.language} - Block ${block.block_id}</h3>
+                <p>Versions: ${block.versions.length}</p>
+                <p>Last updated: ${new Date(block.updated_at * 1000).toLocaleString()}</p>
+                <div class="version-timeline">
+                    ${this.renderVersionTimeline(block)}
+                </div>
+            `;
+            
+            card.onclick = () => this.showBlockDetails(block);
+            blockList.appendChild(card);
+        });
+    }
+    
+    renderVersionTimeline(block) {
+        return block.versions.map((version, index) => `
+            <div class="version-item ${version.status} ${index === block.versions.length - 1 ? 'current' : ''}">
+                <strong>${version.version_id}</strong> - ${version.status}
+                <br>
+                <small>${new Date(version.timestamp * 1000).toLocaleString()}</small>
+                ${version.change_summary ? `<br><small>${version.change_summary}</small>` : ''}
+            </div>
+        `).join('');
+    }
+    
+    showBlockDetails(block) {
+        // Create modal with full version history
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        `;
+        
+        const content = document.createElement('div');
+        content.style.cssText = `
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+            width: 90%;
+        `;
+        
+        let html = `
+            <h2>Block ${block.block_id} History</h2>
+            <button onclick="this.closest('div[style*=fixed]').remove()">Close</button>
+        `;
+        
+        // Show version comparison
+        if (block.versions.length >= 2) {
+            html += '<h3>Version Comparison</h3>';
+            html += this.generateDiffView(block.versions[block.versions.length - 2], 
+                                          block.versions[block.versions.length - 1]);
+        }
+        
+        // Show all versions
+        html += '<h3>All Versions</h3>';
+        block.versions.forEach((version, index) => {
+            html += `
+                <div class="version-item ${version.status}">
+                    <h4>${version.version_id} - ${version.status}</h4>
+                    <p>Time: ${new Date(version.timestamp * 1000).toLocaleString()}</p>
+                    ${version.change_summary ? `<p>Changes: ${version.change_summary}</p>` : ''}
+                    ${version.error_info ? `<p class="error">Errors: ${version.error_info.message}</p>` : ''}
+                    <pre class="diff-view"><code>${version.code}</code></pre>
+                </div>
+            `;
+        });
+        
+        content.innerHTML = html;
+        modal.appendChild(content);
+        document.body.appendChild(modal);
+    }
+    
+    generateDiffView(oldVersion, newVersion) {
+        const oldLines = oldVersion.code.split('\n');
+        const newLines = newVersion.code.split('\n');
+        
+        let diff = '';
+        const maxLines = Math.max(oldLines.length, newLines.length);
+        
+        for (let i = 0; i < maxLines; i++) {
+            if (i < oldLines.length && i < newLines.length) {
+                if (oldLines[i] !== newLines[i]) {
+                    diff += `<div class="removed">- ${oldLines[i]}</div>`;
+                    diff += `<div class="added">+ ${newLines[i]}</div>`;
+                } else {
+                    diff += `<div>  ${oldLines[i]}</div>`;
+                }
+            } else if (i < oldLines.length) {
+                diff += `<div class="removed">- ${oldLines[i]}</div>`;
+            } else if (i < newLines.length) {
+                diff += `<div class="added">+ ${newLines[i]}</div>`;
+            }
+        }
+        
+        return `<div class="diff-view">${diff}</div>`;
+    }
+}
+
+// Initialize viewer
+const viewer = new VersionViewer();
+Key Features of the Robust System:
+1. Version Tracking
+Every code change is tracked with unique version IDs
+
+Version history shows what changed and when
+
+Can revert to any previous version
+
+2. Error Detection & Tracking
+Automatically detects error mentions in chat
+
+Tracks error types and patterns
+
+Suggests fixes for common errors
+
+3. Smart Update Handling
+Detects if new code is fixing errors in old code
+
+Marks versions appropriately (original, error, fixed, optimized)
+
+Maintains relationship between versions
+
+4. Change Detection
+Shows diffs between versions
+
+Identifies added, removed, and modified lines
+
+Generates change summaries
+
+5. Context Awareness
+Associates code blocks with conversation context
+
+Tracks which messages contained errors
+
+Maintains project structure
+
+6. Rollback Capability
+Can revert to any previous version
+
+Maintains full history
+
+Safe experimentation with code changes
+
+Usage Flow:
+Initial Code: Copy code from DeepSeek
+
+Error Detection: System detects if code has errors
+
+Version Created: First version saved
+
+Error Fix: User asks DeepSeek to fix errors
+
+New Version: Fixed code creates new version
+
+Change Analysis: System shows what was fixed
+
+IDE Update: Fixed code automatically updates in IDE
+
+This system handles the complete lifecycle of code development, from initial creation through error fixing and optimization, with full tracking and versioning. Would you like me to add any specific features for your workflow?
+
+any recommendations ?
+Great question! Here are my recommendations to make this system truly production-ready and robust:
+
+🎯 Key Recommendations
+1. Architecture Improvements
+A. Use WebSocket Instead of HTTP Polling
+python
+# WebSocket server for real-time updates
+import asyncio
+import websockets
+import json
+from typing import Dict, Set
+
+class WebSocketServer:
+    def __init__(self):
+        self.clients: Set[websockets.WebSocketServerProtocol] = set()
+        self.message_queue = asyncio.Queue()
+    
+    async def register(self, websocket):
+        self.clients.add(websocket)
+        try:
+            async for message in websocket:
+                await self.handle_message(websocket, message)
+        finally:
+            self.clients.remove(websocket)
+    
+    async def handle_message(self, websocket, message):
+        data = json.loads(message)
+        # Process message
+        response = await self.process_data(data)
+        # Broadcast to all clients
+        await self.broadcast(response)
+    
+    async def broadcast(self, message):
+        if self.clients:
+            await asyncio.gather(
+                *[client.send(json.dumps(message)) for client in self.clients]
+            )
+B. Add Message Queue for Reliability
+python
+# Use Redis or RabbitMQ for message queuing
+import redis
+from rq import Queue
+from rq.job import Job
+
+class MessageQueueManager:
+    def __init__(self):
+        self.redis_conn = redis.Redis(host='localhost', port=6379)
+        self.queue = Queue(connection=self.redis_conn)
+    
+    def enqueue_copy_task(self, code_data):
+        """Queue copy task for processing"""
+        job = self.queue.enqueue(
+            'tasks.process_code_copy',
+            code_data,
+            retry=3,
+            timeout=30
+        )
+        return job.id
+    
+    def get_job_status(self, job_id):
+        """Check job status"""
+        job = Job.fetch(job_id, connection=self.redis_conn)
+        return job.get_status()
+2. Intelligent Code Analysis
+A. Add AST Parsing for Better Code Understanding
+python
+import ast
+import esprima  # For JavaScript
+from typing import Dict, List, Optional
+
+class CodeAnalyzer:
+    def analyze_python_code(self, code: str) -> Dict:
+        """Analyze Python code structure"""
+        try:
+            tree = ast.parse(code)
+            return {
+                'imports': self.extract_imports(tree),
+                'functions': self.extract_functions(tree),
+                'classes': self.extract_classes(tree),
+                'complexity': self.calculate_complexity(tree),
+                'dependencies': self.find_dependencies(tree)
+            }
+        except SyntaxError as e:
+            return {'error': str(e)}
+    
+    def extract_imports(self, tree):
+        imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                imports.append(node.module)
+        return imports
+    
+    def extract_functions(self, tree):
+        functions = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                functions.append({
+                    'name': node.name,
+                    'args': [arg.arg for arg in node.args.args],
+                    'lineno': node.lineno,
+                    'decorators': [d.id for d in node.decorator_list]
+                })
+        return functions
+    
+    def calculate_complexity(self, tree):
+        """Calculate cyclomatic complexity"""
+        complexity = 1
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.If, ast.While, ast.For, ast.ExceptHandler)):
+                complexity += 1
+            elif isinstance(node, ast.BoolOp):
+                complexity += len(node.values) - 1
+        return complexity
+B. Add ML-based Error Prediction
+python
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.ensemble import RandomForestClassifier
+import joblib
+
+class ErrorPredictor:
+    def __init__(self):
+        self.vectorizer = TfidfVectorizer(max_features=1000)
+        self.classifier = RandomForestClassifier()
+        self.model_path = Path.home() / '.deepseek-copier' / 'models'
+    
+    def train(self, code_samples, error_labels):
+        """Train error prediction model"""
+        X = self.vectorizer.fit_transform(code_samples)
+        self.classifier.fit(X, error_labels)
+        
+        # Save model
+        self.model_path.mkdir(exist_ok=True)
+        joblib.dump(self.vectorizer, self.model_path / 'vectorizer.pkl')
+        joblib.dump(self.classifier, self.model_path / 'classifier.pkl')
+    
+    def predict_error_probability(self, code):
+        """Predict if code likely has errors"""
+        try:
+            vectorizer = joblib.load(self.model_path / 'vectorizer.pkl')
+            classifier = joblib.load(self.model_path / 'classifier.pkl')
+            
+            X = vectorizer.transform([code])
+            proba = classifier.predict_proba(X)[0]
+            return {
+                'error_probability': proba[1],
+                'confidence': max(proba)
+            }
+        except:
+            return {'error_probability': 0.5, 'confidence': 0}
+3. IDE Integration Improvements
+A. Use Language Server Protocol (LSP)
+python
+from pyls_jsonrpc.streams import JsonRpcStreamReader, JsonRpcStreamWriter
+import subprocess
+
+class LSPClient:
+    def __init__(self, language_server_command):
+        self.process = subprocess.Popen(
+            language_server_command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        self.reader = JsonRpcStreamReader(self.process.stdout)
+        self.writer = JsonRpcStreamWriter(self.process.stdin)
+    
+    def initialize(self):
+        """Initialize LSP connection"""
+        params = {
+            'processId': os.getpid(),
+            'rootUri': None,
+            'capabilities': {
+                'textDocument': {
+                    'synchronization': {'dynamicRegistration': True},
+                    'completion': {'dynamicRegistration': True},
+                    'hover': {'dynamicRegistration': True},
+                    'signatureHelp': {'dynamicRegistration': True},
+                    'definition': {'dynamicRegistration': True},
+                    'references': {'dynamicRegistration': True},
+                    'documentHighlight': {'dynamicRegistration': True},
+                    'documentSymbol': {'dynamicRegistration': True},
+                    'codeAction': {'dynamicRegistration': True},
+                    'codeLens': {'dynamicRegistration': True},
+                    'formatting': {'dynamicRegistration': True},
+                    'rangeFormatting': {'dynamicRegistration': True},
+                    'onTypeFormatting': {'dynamicRegistration': True},
+                    'rename': {'dynamicRegistration': True}
+                }
+            }
+        }
+        return self.writer.write({
+            'jsonrpc': '2.0',
+            'id': 1,
+            'method': 'initialize',
+            'params': params
+        })
+B. Create IDE-specific Plugins
+json
+// VS Code Plugin - package.json
+{
+  "name": "deepseek-smart-copier",
+  "contributes": {
+    "commands": [
+      {
+        "command": "deepseek.insertCode",
+        "title": "DeepSeek: Insert Code at Cursor"
+      },
+      {
+        "command": "deepseek.showHistory",
+        "title": "DeepSeek: Show Version History"
+      },
+      {
+        "command": "deepseek.revertVersion",
+        "title": "DeepSeek: Revert to Previous Version"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "deepseek.insertCode",
+        "key": "ctrl+shift+d",
+        "mac": "cmd+shift+d"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "deepseek.insertCode",
+          "group": "deepseek"
+        }
+      ]
+    }
+  }
+}
+4. Security Enhancements
+A. Add Encryption for Code Storage
+python
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+import base64
+
+class SecureStorage:
+    def __init__(self, password=None):
+        self.key = self.generate_key(password)
+        self.cipher = Fernet(self.key)
+    
+    def generate_key(self, password):
+        if not password:
+            # Generate random key
+            return Fernet.generate_key()
+        
+        # Derive key from password
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=b'deepseek-copier',
+            iterations=100000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
+        return key
+    
+    def encrypt_code(self, code):
+        return self.cipher.encrypt(code.encode())
+    
+    def decrypt_code(self, encrypted_code):
+        return self.cipher.decrypt(encrypted_code).decode()
+B. Add Authentication
+python
+import jwt
+import hashlib
+from datetime import datetime, timedelta
+
+class AuthManager:
+    def __init__(self, secret_key):
+        self.secret_key = secret_key
+    
+    def generate_token(self, user_id, expires_in=3600):
+        payload = {
+            'user_id': user_id,
+            'exp': datetime.utcnow() + timedelta(seconds=expires_in),
+            'iat': datetime.utcnow()
+        }
+        return jwt.encode(payload, self.secret_key, algorithm='HS256')
+    
+    def verify_token(self, token):
+        try:
+            payload = jwt.decode(token, self.secret_key, algorithms=['HS256'])
+            return payload
+        except jwt.ExpiredSignatureError:
+            return None
+        except jwt.InvalidTokenError:
+            return None
+5. Performance Optimizations
+A. Add Caching Layer
+python
+from functools import lru_cache
+import redis
+import pickle
+
+class CodeCache:
+    def __init__(self):
+        self.redis = redis.Redis(host='localhost', port=6379)
+        self.cache_ttl = 3600  # 1 hour
+    
+    def get_cached_code(self, code_hash):
+        cached = self.redis.get(f"code:{code_hash}")
+        if cached:
+            return pickle.loads(cached)
+        return None
+    
+    def cache_code(self, code_hash, code_data):
+        self.redis.setex(
+            f"code:{code_hash}",
+            self.cache_ttl,
+            pickle.dumps(code_data)
+        )
+    
+    def invalidate_cache(self, code_hash):
+        self.redis.delete(f"code:{code_hash}")
+B. Add Batch Processing
+python
+class BatchProcessor:
+    def __init__(self, batch_size=10):
+        self.batch_size = batch_size
+        self.pending_items = []
+        self.processing = False
+    
+    async def add_item(self, item):
+        self.pending_items.append(item)
+        if len(self.pending_items) >= self.batch_size:
+            await self.process_batch()
+    
+    async def process_batch(self):
+        if self.processing:
+            return
+        
+        self.processing = True
+        batch = self.pending_items[:self.batch_size]
+        self.pending_items = self.pending_items[self.batch_size:]
+        
+        # Process batch in parallel
+        results = await asyncio.gather(
+            *[self.process_item(item) for item in batch]
+        )
+        
+        self.processing = False
+        return results
+6. User Experience Improvements
+A. Add Desktop Notifications
+python
+from plyer import notification
+import platform
+
+class NotificationManager:
+    def show_notification(self, title, message, timeout=5):
+        if platform.system() == 'Darwin':
+            # macOS
+            subprocess.run([
+                'osascript', '-e',
+                f'display notification "{message}" with title "{title}"'
+            ])
+        elif platform.system() == 'Windows':
+            # Windows
+            notification.notify(
+                title=title,
+                message=message,
+                timeout=timeout
+            )
+        else:
+            # Linux
+            subprocess.run([
+                'notify-send', title, message
+            ])
+B. Add Progress Indicators
+python
+from tqdm import tqdm
+import time
+
+class ProgressTracker:
+    def __init__(self, total_steps):
+        self.progress_bar = tqdm(total=total_steps)
+    
+    def update(self, step_name):
+        self.progress_bar.set_description(f"Processing: {step_name}")
+        self.progress_bar.update(1)
+    
+    def complete(self):
+        self.progress_bar.close()
+7. Testing & Monitoring
+A. Add Unit Tests
+python
+import unittest
+from version_manager import CodeVersionManager
+
+class TestVersionManager(unittest.TestCase):
+    def setUp(self):
+        self.manager = CodeVersionManager(Path('/tmp/test_versions'))
+    
+    def test_code_versioning(self):
+        code1 = "print('hello')"
+        code2 = "print('hello world')"
+        
+        block1 = self.manager.add_or_update_block(code1, 'python')
+        block2 = self.manager.add_or_update_block(code2, 'python')
+        
+        self.assertEqual(block1.block_id, block2.block_id)
+        self.assertEqual(len(block2.versions), 2)
+    
+    def test_error_detection(self):
+        code_with_error = "print('unclosed string)"
+        code_fixed = "print('closed string')"
+        
+        block1 = self.manager.add_or_update_block(
+            code_with_error, 'python', 
+            error_info={'message': 'SyntaxError'}
+        )
+        block2 = self.manager.add_or_update_block(code_fixed, 'python')
+        
+        self.assertEqual(block2.versions[-1].status, CodeStatus.FIXED)
+B. Add Logging
+python
+import logging
+from logging.handlers import RotatingFileHandler
+
+class Logger:
+    def __init__(self, log_file='deepseek_copier.log'):
+        self.logger = logging.getLogger('DeepSeekCopier')
+        self.logger.setLevel(logging.DEBUG)
+        
+        # File handler
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5
+        )
+        file_handler.setLevel(logging.DEBUG)
+        
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        
+        # Formatter
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        file_handler.setFormatter(formatter)
+        console_handler.setFormatter(formatter)
+        
+        self.logger.addHandler(file_handler)
+        self.logger.addHandler(console_handler)
+    
+    def info(self, message):
+        self.logger.info(message)
+    
+    def error(self, message):
+        self.logger.error(message)
+    
+    def debug(self, message):
+        self.logger.debug(message)
+8. Configuration Management
+A. Use Environment Variables
+python
+import os
+from dotenv import load_dotenv
+
+class Config:
+    def __init__(self):
+        load_dotenv()
+        
+        self.server_port = int(os.getenv('DEEPSEEK_SERVER_PORT', 8765))
+        self.storage_dir = Path(os.getenv('DEEPSEEK_STORAGE_DIR', '~/.deepseek-copier'))
+        self.redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379')
+        self.database_url = os.getenv('DATABASE_URL', 'sqlite:///deepseek.db')
+        self.secret_key = os.getenv('DEEPSEEK_SECRET_KEY', 'default-secret-key')
+        
+        # Feature flags
+        self.enable_versioning = os.getenv('ENABLE_VERSIONING', 'true').lower() == 'true'
+        self.enable_error_tracking = os.getenv('ENABLE_ERROR_TRACKING', 'true').lower() == 'true'
+        self.enable_ml_prediction = os.getenv('ENABLE_ML_PREDICTION', 'false').lower() == 'true'
+B. Add Hot Reload
+python
+import watchtower
+import watchfiles
+
+class ConfigWatcher:
+    def __init__(self, config_file, callback):
+        self.config_file = config_file
+        self.callback = callback
+        self.watcher = watchfiles.watch(config_file)
+    
+    def start(self):
+        for changes in self.watcher:
+            self.callback()
+📊 Priority Matrix
+Feature	Impact	Effort	Priority
+WebSocket Support	High	Medium	🔴 High
+AST-based Analysis	High	Medium	🔴 High
+VS Code Extension	High	High	🔴 High
+Error Prediction ML	Medium	High	🟡 Medium
+Redis Caching	Medium	Low	🟡 Medium
+Desktop Notifications	Medium	Low	🟡 Medium
+LSP Integration	High	High	🟢 Low
+Authentication	Medium	Medium	🟢 Low
+Unit Tests	High	Medium	🔴 High
+Logging	High	Low	🔴 High
+🚀 Quick Wins (Implement First)
+Add comprehensive logging
+
+Implement basic unit tests
+
+Add Redis caching
+
+Enable desktop notifications
+
+Create VS Code extension
+
+🎯 Long-term Improvements
+ML-based code quality prediction
+
+Full LSP integration
+
+Multi-user support
+
+Cloud sync capabilities
+
+Advanced code refactoring suggestions
+
+Would you like me to implement any of these specific recommendations? I can provide detailed code for the most impactful ones!
+
+need 1- project md 2- user guide - and ui ux ?
+I'll create a comprehensive project documentation, user guide, and UI/UX design that makes this system professional and user-friendly.
+
+1. PROJECT.md - Complete Project Documentation
+markdown
+# DeepSeek IDE Copier - Project Documentation
+
+![DeepSeek Copier Banner](https://via.placeholder.com/1200x300/4CAF50/white?text=DeepSeek+IDE+Copier)
+
+## 📋 Project Overview
+
+**DeepSeek IDE Copier** is an intelligent bridge between DeepSeek AI chat and your development environment. It automatically captures, versions, and transfers code from DeepSeek conversations directly into your IDE with smart error tracking and version management.
+
+### 🎯 Core Value Proposition
+
+- **Seamless Integration**: Copy code from DeepSeek to IDE without manual intervention
+- **Smart Versioning**: Track every code change with automatic version control
+- **Error Intelligence**: Detect and track errors, suggest fixes automatically
+- **Multi-IDE Support**: Works with VS Code, JetBrains IDEs, Sublime Text, and more
+- **Context Awareness**: Understands code context and maintains project structure
+
+## 🏗️ System Architecture
+┌─────────────────────────────────────────────────────────────┐
+│ DeepSeek Chat Web App │
+│ ┌──────────────────────────────────────────────────────┐ │
+│ │ Browser Extension (Content Script) │ │
+│ │ • Code Block Detection │ │
+│ │ • Full Chat Export │ │
+│ │ • Error Detection │ │
+│ │ • Version Tracking │ │
+│ └──────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+│
+│ HTTP/WebSocket
+▼
+┌─────────────────────────────────────────────────────────────┐
+│ Local Server (Python) │
+│ ┌──────────────────────────────────────────────────────┐ │
+│ │ Core Services │ │
+│ │ • Version Manager │ │
+│ │ • Error Tracker │ │
+│ │ • IDE Detector │ │
+│ │ • Code Analyzer │ │
+│ │ • File Manager │ │
+│ └──────────────────────────────────────────────────────┘ │
+│ ┌──────────────────────────────────────────────────────┐ │
+│ │ Storage Layer │ │
+│ │ • SQLite Database (Metadata) │ │
+│ │ • File System (Code Files) │ │
+│ │ • Redis (Cache & Queue) │ │
+│ └──────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+│
+│ Native APIs
+▼
+┌─────────────────────────────────────────────────────────────┐
+│ IDE Integration Layer │
+│ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ │
+│ │ VS Code │ │ JetBrains │ │ Others │ │
+│ │ Extension │ │ Plugin │ │ (Sublime, │ │
+│ │ │ │ │ │ Atom) │ │
+│ └──────────────┘ └──────────────┘ └──────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+
+text
+
+## 📁 Project Structure
+deepseek-ide-copier/
+├── README.md
+├── PROJECT.md
+├── USER_GUIDE.md
+├── LICENSE
+├── requirements.txt
+├── setup.py
+├── .env.example
+├── .gitignore
+│
+├── src/
+│ ├── init.py
+│ ├── server/
+│ │ ├── init.py
+│ │ ├── main.py
+│ │ ├── api_handler.py
+│ │ ├── websocket_server.py
+│ │ └── config.py
+│ │
+│ ├── core/
+│ │ ├── init.py
+│ │ ├── version_manager.py
+│ │ ├── error_tracker.py
+│ │ ├── code_analyzer.py
+│ │ ├── ide_detector.py
+│ │ └── file_manager.py
+│ │
+│ ├── integrations/
+│ │ ├── init.py
+│ │ ├── vscode/
+│ │ │ ├── extension.js
+│ │ │ └── package.json
+│ │ ├── jetbrains/
+│ │ │ └── plugin.xml
+│ │ └── others/
+│ │ └── sublime.py
+│ │
+│ └── utils/
+│ ├── init.py
+│ ├── logger.py
+│ ├── security.py
+│ └── helpers.py
+│
+├── browser_extension/
+│ ├── manifest.json
+│ ├── content.js
+│ ├── background.js
+│ ├── popup.html
+│ ├── popup.js
+│ └── styles.css
+│
+├── web_dashboard/
+│ ├── index.html
+│ ├── dashboard.js
+│ ├── styles.css
+│ └── components/
+│ ├── version_history.html
+│ ├── error_tracker.html
+│ └── settings.html
+│
+├── tests/
+│ ├── unit/
+│ │ ├── test_version_manager.py
+│ │ ├── test_error_tracker.py
+│ │ └── test_code_analyzer.py
+│ ├── integration/
+│ │ ├── test_api.py
+│ │ └── test_websocket.py
+│ └── e2e/
+│ └── test_full_flow.py
+│
+├── docs/
+│ ├── API.md
+│ ├── ARCHITECTURE.md
+│ ├── CONTRIBUTING.md
+│ └── DEPLOYMENT.md
+│
+└── scripts/
+├── install.sh
+├── uninstall.sh
+├── start_server.sh
+└── setup_dev.sh
+
+text
+
+## 🔧 Technology Stack
+
+### Backend
+- **Python 3.9+**: Core server and business logic
+- **FastAPI**: REST API framework
+- **WebSockets**: Real-time communication
+- **SQLAlchemy**: Database ORM
+- **Redis**: Caching and message queue
+- **Pydantic**: Data validation
+
+### Frontend (Browser Extension)
+- **Vanilla JavaScript**: Content scripts
+- **Chrome Extension APIs**: Browser integration
+- **Web Components**: Reusable UI elements
+
+### IDE Integrations
+- **VS Code Extension API**: TypeScript/JavaScript
+- **IntelliJ Platform SDK**: Java/Kotlin
+- **Sublime Text API**: Python
+
+### Database
+- **SQLite**: Local metadata storage
+- **Redis**: Cache and real-time data
+
+## 🚀 Features & Capabilities
+
+### Core Features
+| Feature | Description | Status |
+|---------|-------------|--------|
+| Code Block Detection | Auto-detect code in DeepSeek responses | ✅ Implemented |
+| Full Chat Export | Export entire conversation | ✅ Implemented |
+| Version Tracking | Track all code versions | ✅ Implemented |
+| Error Detection | Detect errors in code | ✅ Implemented |
+| IDE Auto-Detection | Detect installed IDEs | ✅ Implemented |
+| Multi-IDE Support | VS Code, JetBrains, etc. | ✅ Implemented |
+| Markdown Export | Export as markdown | ✅ Implemented |
+| Clipboard Integration | Automatic clipboard copy | ✅ Implemented |
+
+### Advanced Features
+| Feature | Description | Status |
+|---------|-------------|--------|
+| ML Error Prediction | Predict potential errors | 🔄 In Development |
+| Code Quality Analysis | Analyze code quality | 🔄 In Development |
+| Smart Refactoring | Suggest code improvements | 🔄 In Development |
+| Team Collaboration | Share code with team | 📋 Planned |
+| Cloud Sync | Sync across devices | 📋 Planned |
+| Git Integration | Auto-commit code | 📋 Planned |
+
+## 🗄️ Database Schema
+
+```sql
+-- Code Blocks Table
+CREATE TABLE code_blocks (
+    id TEXT PRIMARY KEY,
+    language TEXT NOT NULL,
+    current_version TEXT,
+    file_path TEXT,
+    context JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Code Versions Table
+CREATE TABLE code_versions (
+    id TEXT PRIMARY KEY,
+    block_id TEXT REFERENCES code_blocks(id),
+    version_number INTEGER,
+    code TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    status TEXT,
+    parent_version TEXT,
+    error_info JSON,
+    change_summary TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Error Tracking Table
+CREATE TABLE error_tracking (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version_id TEXT REFERENCES code_versions(id),
+    error_type TEXT,
+    error_message TEXT,
+    code_snippet TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- IDE Configurations Table
+CREATE TABLE ide_configurations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ide_type TEXT,
+    ide_name TEXT,
+    command TEXT,
+    is_active BOOLEAN DEFAULT FALSE,
+    config JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- User Preferences Table
+CREATE TABLE user_preferences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT UNIQUE,
+    value JSON,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+🔐 Security Considerations
+Data Protection
+All code stored locally
+
+Optional encryption at rest
+
+No cloud transmission by default
+
+Secure WebSocket connections
+
+Authentication
+Local API key authentication
+
+Token-based session management
+
+Optional OAuth for cloud features
+
+Privacy
+No analytics collection
+
+No tracking
+
+User controls all data
+
+Export/delete functionality
+
+📊 Performance Metrics
+Targets
+Code Detection: < 100ms
+
+Version Creation: < 50ms
+
+IDE Integration: < 200ms
+
+WebSocket Response: < 30ms
+
+Database Query: < 10ms
+
+Memory Usage: < 200MB
+
+CPU Usage: < 10% average
+
+Optimization Strategies
+Lazy loading of modules
+
+Connection pooling
+
+Query optimization
+
+Caching strategies
+
+Batch processing
+
+Asynchronous operations
+
+🧪 Testing Strategy
+Unit Tests
+Code versioning logic
+
+Error detection
+
+IDE detection
+
+File management
+
+Integration Tests
+API endpoints
+
+WebSocket communication
+
+Database operations
+
+Browser extension
+
+E2E Tests
+Full flow from DeepSeek to IDE
+
+Error handling scenarios
+
+Multi-IDE switching
+
+Version rollback
+
+Performance Tests
+Load testing
+
+Stress testing
+
+Memory leak detection
+
+Network latency
+
+📈 Roadmap
+Phase 1 (Current) - MVP
+☑ Basic code copying
+☑ Version tracking
+☑ Error detection
+☑ IDE integration
+Phase 2 - Enhanced Features
+□ ML-based error prediction
+□ Code quality analysis
+□ Smart suggestions
+□ Advanced diff viewer
+Phase 3 - Enterprise
+□ Team collaboration
+□ Cloud sync
+□ Advanced security
+□ API access
+Phase 4 - Ecosystem
+□ Plugin marketplace
+□ Custom integrations
+□ Automation workflows
+□ CI/CD integration
+🤝 Contributing
+Development Setup
+Fork the repository
+
+Clone your fork
+
+Install dependencies
+
+Set up development environment
+
+Make changes
+
+Submit pull request
+
+Code Standards
+PEP 8 for Python
+
+ESLint for JavaScript
+
+Type hints required
+
+Documentation required
+
+Tests required
+
+Commit Guidelines
+Conventional commits
+
+Descriptive messages
+
+Reference issues
+
+Atomic commits
+
+📄 License
+MIT License - See LICENSE file for details
+
+🙏 Acknowledgments
+DeepSeek AI team
+
+Open source community
+
+Contributors and testers
+
+📞 Contact
+Issues: GitHub Issues
+
+Discussions: GitHub Discussions
+
+Email: support@deepseek-copier.dev
+
+Version: 2.0.0
+Last Updated: 2024
+Maintainers: DeepSeek Copier Team
+
+text
+
+## 2. USER_GUIDE.md - Complete User Guide
+
+```markdown
+# DeepSeek IDE Copier - User Guide
+
+## 📖 Table of Contents
+1. [Getting Started](#getting-started)
+2. [Installation](#installation)
+3. [Configuration](#configuration)
+4. [Basic Usage](#basic-usage)
+5. [Advanced Features](#advanced-features)
+6. [Troubleshooting](#troubleshooting)
+7. [FAQ](#faq)
+
+## 🚀 Getting Started
+
+### Prerequisites
+- **Python 3.9+** installed
+- **Chrome/Firefox** browser
+- **VS Code** or other supported IDE
+- **Node.js 14+** (for extension development)
+
+### Quick Start
+```bash
+# 1. Install the package
+pip install deepseek-ide-copier
+
+# 2. Start the server
+deepseek-copier start
+
+# 3. Install browser extension
+# Load the extension from browser_extension/ folder
+
+# 4. Start using!
+📦 Installation
+Step 1: Install Python Package
+bash
+# Using pip
+pip install deepseek-ide-copier
+
+# Or from source
+git clone https://github.com/your-repo/deepseek-ide-copier.git
+cd deepseek-ide-copier
+pip install -e .
+Step 2: Install Browser Extension
+Chrome
+Open chrome://extensions/
+
+Enable "Developer mode"
+
+Click "Load unpacked"
+
+Select browser_extension/ folder
+
+Firefox
+Open about:debugging
+
+Click "This Firefox"
+
+Click "Load Temporary Add-on"
+
+Select browser_extension/manifest.json
+
+Step 3: Install IDE Extensions
+VS Code
+bash
+# Install from marketplace
+code --install-extension deepseek-copier
+
+# Or manually
+# Copy vscode_extension/ to ~/.vscode/extensions/
+JetBrains IDEs
+Open Settings/Preferences
+
+Go to Plugins
+
+Search "DeepSeek Copier"
+
+Install and restart
+
+⚙️ Configuration
+Server Configuration
+Create ~/.deepseek-copier/config.json:
+
+json
+{
+  "server": {
+    "port": 8765,
+    "host": "localhost",
+    "websocket": true,
+    "ssl": false
+  },
+  "storage": {
+    "directory": "~/.deepseek-copier/data",
+    "database": "sqlite:///deepseek.db",
+    "max_versions": 10,
+    "auto_cleanup": true
+  },
+  "ide": {
+    "default": "auto",
+    "vscode": {
+      "command": "code",
+      "insert_at_cursor": true
+    },
+    "pycharm": {
+      "command": "pycharm",
+      "reformat_on_insert": true
+    }
+  },
+  "features": {
+    "version_tracking": true,
+    "error_detection": true,
+    "auto_copy": true,
+    "desktop_notifications": true,
+    "sound_alerts": false
+  },
+  "security": {
+    "encrypt_storage": false,
+    "api_key": "",
+    "allowed_origins": ["chrome-extension://*"]
+  }
+}
+Environment Variables
+bash
+# .env file
+DEEPSEEK_SERVER_PORT=8765
+DEEPSEEK_STORAGE_DIR=~/.deepseek-copier
+DEEPSEEK_DEFAULT_IDE=auto
+DEEPSEEK_ENABLE_VERSIONING=true
+DEEPSEEK_ENABLE_ERROR_TRACKING=true
+DEEPSEEK_LOG_LEVEL=INFO
+DEEPSEEK_SECRET_KEY=your-secret-key
+💻 Basic Usage
+1. Copy Code Blocks
+Navigate to DeepSeek chat
+
+Code blocks automatically get "Copy to IDE" buttons
+
+Click to copy individual blocks
+
+Or use keyboard shortcut: Ctrl+Shift+C
+
+2. Copy Full Chat
+Click "📄 Copy Full Chat" button
+
+Or use extension popup
+
+Entire conversation exported to IDE
+
+3. Version History
+View version history in dashboard
+
+Revert to previous versions
+
+Compare code changes
+
+4. Error Handling
+Errors automatically detected
+
+Fix suggestions provided
+
+Track error patterns
+
+🎯 Advanced Features
+1. Smart Version Management
+python
+# View version history
+deepseek-copier history --block-id abc123
+
+# Revert to specific version
+deepseek-copier revert --block-id abc123 --version v2
+
+# Compare versions
+deepseek-copier diff --block-id abc123 --version1 v1 --version2 v2
+2. Project Organization
+python
+# Organize code into projects
+deepseek-copier project create my-project
+
+# Add code to project
+deepseek-copier project add --project my-project --file code.py
+
+# Export project
+deepseek-copier project export --project my-project --format zip
+3. IDE Integration
+python
+# Set default IDE
+deepseek-copier config set ide.default vscode
+
+# Test IDE connection
+deepseek-copier ide test
+
+# List detected IDEs
+deepseek-copier ide list
+4. Automation
+python
+# Watch clipboard for code
+deepseek-copier watch --clipboard
+
+# Auto-save to project
+deepseek-copier auto-save --project my-project
+
+# Batch process files
+deepseek-copier batch process --directory ./code
+🖥️ Web Dashboard
+Access Dashboard
+Open http://localhost:8765/dashboard
+
+View version history
+
+Manage projects
+
+Configure settings
+
+Track errors
+
+Dashboard Features
+Code Browser: Browse all captured code
+
+Version Timeline: See code evolution
+
+Error Analytics: Track error patterns
+
+Project Manager: Organize code
+
+Settings: Configure everything
+
+🔧 Troubleshooting
+Common Issues
+Server Won't Start
+bash
+# Check port usage
+lsof -i :8765
+
+# Kill process using port
+kill -9 $(lsof -t -i:8765)
+
+# Start with debug logging
+deepseek-copier start --debug
+Extension Not Working
+Check if server is running
+
+Reload extension
+
+Clear browser cache
+
+Check console for errors
+
+IDE Not Detected
+bash
+# Check IDE installation
+which code  # VS Code
+which pycharm  # PyCharm
+
+# Add IDE manually
+deepseek-copier ide add --name "VS Code" --command "/path/to/code"
+Code Not Copying
+Check clipboard permissions
+
+Verify server connection
+
+Check firewall settings
+
+Enable clipboard access in browser
+
+Logs
+bash
+# View logs
+tail -f ~/.deepseek-copier/logs/deepseek.log
+
+# Enable debug logging
+export DEEPSEEK_LOG_LEVEL=DEBUG
+deepseek-copier start
+❓ FAQ
+General
+Q: Is my code stored securely?
+A: Yes, all code is stored locally. You can enable encryption for additional security.
+
+Q: Does it work offline?
+A: Yes, the system works entirely locally.
+
+Q: Can I use multiple IDEs?
+A: Yes, the system supports multiple IDEs and can switch between them.
+
+Q: Is it free?
+A: Yes, the basic version is open source and free.
+
+Technical
+Q: What languages are supported?
+A: All languages that DeepSeek supports, with special handling for 20+ popular languages.
+
+Q: How does version tracking work?
+A: Each code change creates a new version with diff tracking and change summaries.
+
+Q: Can I customize the detection?
+A: Yes, you can customize code block detection patterns in settings.
+
+Q: Does it work with Jupyter notebooks?
+A: Yes, it can export code to Jupyter notebooks.
+
+Troubleshooting
+Q: Why isn't my IDE detected?
+A: Ensure the IDE is in your PATH or add it manually in settings.
+
+Q: Can I recover deleted code?
+A: Yes, if version tracking is enabled, you can recover previous versions.
+
+Q: How do I export my data?
+A: Use the export feature in the dashboard or CLI.
+
+Q: Is there a size limit?
+A: No hard limit, but performance may vary with very large codebases.
+
+📚 Resources
+Documentation
+API Reference
+
+Architecture Guide
+
+Contributing Guide
+
+Community
+GitHub Issues
+
+Discussions
+
+Discord Server
+
+Support
+Email: support@deepseek-copier.dev
+
+Documentation: https://docs.deepseek-copier.dev
+
+Blog: https://blog.deepseek-copier.dev
+
+Version: 2.0.0
+Updated: 2024
+License: MIT
+
+text
+
+## 3. UI/UX Design - Complete Design System
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DeepSeek Copier - UI/UX Design System</title>
+    <style>
+        :root {
+            /* Color Palette */
+            --primary: #2196F3;
+            --primary-dark: #1976D2;
+            --primary-light: #BBDEFB;
+            --secondary: #4CAF50;
+            --secondary-dark: #388E3C;
+            --error: #F44336;
+            --warning: #FF9800;
+            --info: #2196F3;
+            --success: #4CAF50;
+            
+            /* Neutrals */
+            --gray-50: #FAFAFA;
+            --gray-100: #F5F5F5;
+            --gray-200: #EEEEEE;
+            --gray-300: #E0E0E0;
+            --gray-400: #BDBDBD;
+            --gray-500: #9E9E9E;
+            --gray-600: #757575;
+            --gray-700: #616161;
+            --gray-800: #424242;
+            --gray-900: #212121;
+            
+            /* Typography */
+            --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            --font-size-xs: 12px;
+            --font-size-sm: 14px;
+            --font-size-md: 16px;
+            --font-size-lg: 18px;
+            --font-size-xl: 20px;
+            --font-size-2xl: 24px;
+            --font-size-3xl: 30px;
+            
+            /* Spacing */
+            --spacing-xs: 4px;
+            --spacing-sm: 8px;
+            --spacing-md: 16px;
+            --spacing-lg: 24px;
+            --spacing-xl: 32px;
+            --spacing-2xl: 48px;
+            
+            /* Border Radius */
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --radius-xl: 16px;
+            --radius-full: 9999px;
+            
+            /* Shadows */
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+            --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.1);
+            
+            /* Transitions */
+            --transition-fast: 150ms;
+            --transition-normal: 300ms;
+            --transition-slow: 500ms;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: var(--font-family);
+            background: var(--gray-50);
+            color: var(--gray-900);
+            line-height: 1.6;
+        }
+        
+        /* Dashboard Layout */
+        .dashboard {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            grid-template-rows: 64px 1fr;
+            grid-template-areas:
+                "sidebar header"
+                "sidebar main";
+            height: 100vh;
+        }
+        
+        .sidebar {
+            grid-area: sidebar;
+            background: white;
+            border-right: 1px solid var(--gray-200);
+            padding: var(--spacing-md);
+            overflow-y: auto;
+        }
+        
+        .header {
+            grid-area: header;
+            background: white;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            padding: 0 var(--spacing-lg);
+            gap: var(--spacing-md);
+        }
+        
+        .main-content {
+            grid-area: main;
+            padding: var(--spacing-lg);
+            overflow-y: auto;
+        }
+        
+        /* Navigation */
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-md);
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--radius-md);
+            color: var(--gray-700);
+            text-decoration: none;
+            transition: all var(--transition-fast);
+            cursor: pointer;
+            margin-bottom: var(--spacing-xs);
+        }
+        
+        .nav-item:hover {
+            background: var(--gray-100);
+            color: var(--gray-900);
+        }
+        
+        .nav-item.active {
+            background: var(--primary-light);
+            color: var(--primary-dark);
+        }
+        
+        .nav-item .icon {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        /* Cards */
+        .card {
+            background: white;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
+            padding: var(--spacing-lg);
+            margin-bottom: var(--spacing-md);
+            transition: all var(--transition-normal);
+        }
+        
+        .card:hover {
+            box-shadow: var(--shadow-md);
+        }
+        
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--spacing-md);
+        }
+        
+        .card-title {
+            font-size: var(--font-size-lg);
+            font-weight: 600;
+            color: var(--gray-900);
+        }
+        
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            padding: var(--spacing-sm) var(--spacing-md);
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: var(--font-size-sm);
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            text-decoration: none;
+        }
+        
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+        
+        .btn-secondary {
+            background: white;
+            color: var(--gray-700);
+            border: 1px solid var(--gray-300);
+        }
+        
+        .btn-secondary:hover {
+            background: var(--gray-50);
+            border-color: var(--gray-400);
+        }
+        
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+        
+        .btn-danger {
+            background: var(--error);
+            color: white;
+        }
+        
+        .btn-sm {
+            padding: var(--spacing-xs) var(--spacing-sm);
+            font-size: var(--font-size-xs);
+        }
+        
+        .btn-lg {
+            padding: var(--spacing-md) var(--spacing-lg);
+            font-size: var(--font-size-md);
+        }
+        
+        /* Code Blocks */
+        .code-block {
+            background: var(--gray-900);
+            color: #E0E0E0;
+            border-radius: var(--radius-md);
+            padding: var(--spacing-md);
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: var(--font-size-sm);
+            line-height: 1.5;
+            overflow-x: auto;
+            position: relative;
+        }
+        
+        .code-block-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: var(--spacing-sm) var(--spacing-md);
+            background: var(--gray-800);
+            border-radius: var(--radius-md) var(--radius-md) 0 0;
+            color: var(--gray-300);
+            font-size: var(--font-size-xs);
+        }
+        
+        .copy-button {
+            position: absolute;
+            top: var(--spacing-sm);
+            right: var(--spacing-sm);
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: none;
+            border-radius: var(--radius-sm);
+            padding: var(--spacing-xs) var(--spacing-sm);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+        
+        .copy-button:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        /* Version Timeline */
+        .timeline {
+            position: relative;
+            padding-left: var(--spacing-xl);
+        }
+        
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 8px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: var(--gray-300);
+        }
+        
+        .timeline-item {
+            position: relative;
+            margin-bottom: var(--spacing-lg);
+        }
+        
+        .timeline-dot {
+            position: absolute;
+            left: -24px;
+            top: 4px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--primary);
+            border: 3px solid white;
+            box-shadow: var(--shadow-sm);
+        }
+        
+        .timeline-dot.error {
+            background: var(--error);
+        }
+        
+        .timeline-dot.fixed {
+            background: var(--success);
+        }
+        
+        /* Status Badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            border-radius: var(--radius-full);
+            font-size: var(--font-size-xs);
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .badge-success {
+            background: #E8F5E9;
+            color: #2E7D32;
+        }
+        
+        .badge-error {
+            background: #FFEBEE;
+            color: #C62828;
+        }
+        
+        .badge-warning {
+            background: #FFF3E0;
+            color: #E65100;
+        }
+        
+        .badge-info {
+            background: #E3F2FD;
+            color: #1565C0;
+        }
+        
+        /* Diff Viewer */
+        .diff-viewer {
+            border: 1px solid var(--gray-200);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        
+        .diff-line {
+            padding: 2px var(--spacing-sm);
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: var(--font-size-xs);
+            white-space: pre-wrap;
+        }
+        
+        .diff-line.added {
+            background: #E8F5E9;
+            color: #2E7D32;
+        }
+        
+        .diff-line.removed {
+            background: #FFEBEE;
+            color: #C62828;
+        }
+        
+        .diff-line.context {
+            color: var(--gray-600);
+        }
+        
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: var(--spacing-md);
+            margin-bottom: var(--spacing-lg);
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-lg);
+            text-align: center;
+            box-shadow: var(--shadow-sm);
+            transition: all var(--transition-normal);
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+        
+        .stat-value {
+            font-size: var(--font-size-3xl);
+            font-weight: 700;
+            color: var(--primary);
+        }
+        
+        .stat-label {
+            font-size: var(--font-size-sm);
+            color: var(--gray-600);
+            margin-top: var(--spacing-xs);
+        }
+        
+        /* Search Bar */
+        .search-bar {
+            display: flex;
+            align-items: center;
+            background: white;
+            border: 1px solid var(--gray-300);
+            border-radius: var(--radius-full);
+            padding: var(--spacing-sm) var(--spacing-md);
+            gap: var(--spacing-sm);
+            transition: all var(--transition-fast);
+        }
+        
+        .search-bar:focus-within {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
+        }
+        
+        .search-input {
+            border: none;
+            outline: none;
+            flex: 1;
+            font-size: var(--font-size-sm);
+        }
+        
+        /* Modals */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            animation: fadeIn var(--transition-normal);
+        }
+        
+        .modal {
+            background: white;
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-xl);
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            animation: slideUp var(--transition-normal);
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--spacing-lg);
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: var(--font-size-xl);
+            cursor: pointer;
+            color: var(--gray-600);
+            transition: color var(--transition-fast);
+        }
+        
+        .modal-close:hover {
+            color: var(--gray-900);
+        }
+        
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        
+        /* Notification Toast */
+        .toast {
+            position: fixed;
+            bottom: var(--spacing-lg);
+            right: var(--spacing-lg);
+            background: var(--gray-900);
+            color: white;
+            padding: var(--spacing-md) var(--spacing-lg);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            animation: slideInRight var(--transition-normal);
+            z-index: 9999;
+        }
+        
+        .toast.success {
+            background: var(--success);
+        }
+        
+        .toast.error {
+            background: var(--error);
+        }
+        
+        .toast.warning {
+            background: var(--warning);
+        }
+        
+        /* Loading Spinner */
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid var(--gray-200);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+                grid-template-rows: 64px 1fr;
+                grid-template-areas:
+                    "header"
+                    "main";
+            }
+            
+            .sidebar {
+                display: none;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        /* Dark Mode */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --gray-50: #1a1a1a;
+                --gray-100: #2d2d2d;
+                --gray-200: #3d3d3d;
+                --gray-300: #4d4d4d;
+                --gray-400: #6d6d6d;
+                --gray-500: #8d8d8d;
+                --gray-600: #adadad;
+                --gray-700: #cdcdcd;
+                --gray-800: #ededed;
+                --gray-900: #ffffff;
+            }
+            
+            .card,
+            .sidebar,
+            .header,
+            .stat-card {
+                background: #2d2d2d;
+            }
+            
+            .code-block {
+                background: #1a1a1a;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Dashboard Example -->
+    <div class="dashboard">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div style="padding: var(--spacing-md); margin-bottom: var(--spacing-lg);">
+                <h2 style="color: var(--primary); font-size: var(--font-size-xl);">
+                    🚀 DeepSeek Copier
+                </h2>
+            </div>
+            
+            <nav>
+                <a class="nav-item active" href="#dashboard">
+                    <span class="icon">📊</span> Dashboard
+                </a>
+                <a class="nav-item" href="#code-blocks">
+                    <span class="icon">💻</span> Code Blocks
+                </a>
+                <a class="nav-item" href="#versions">
+                    <span class="icon">📚</span> Version History
+                </a>
+                <a class="nav-item" href="#errors">
+                    <span class="icon">⚠️</span> Error Tracker
+                </a>
+                <a class="nav-item" href="#projects">
+                    <span class="icon">📁</span> Projects
+                </a>
+                <a class="nav-item" href="#settings">
+                    <span class="icon">⚙️</span> Settings
+                </a>
+            </nav>
+            
+            <div style="margin-top: auto; padding-top: var(--spacing-lg);">
+                <div class="card" style="padding: var(--spacing-md);">
+                    <h4 style="margin-bottom: var(--spacing-sm);">Server Status</h4>
+                    <div style="display: flex; align-items: center; gap: var(--spacing-sm);">
+                        <span style="width: 10px; height: 10px; background: var(--success); border-radius: 50%; animation: pulse 2s infinite;"></span>
+                        <span style="color: var(--success); font-weight: 500;">Running</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- Header -->
+        <header class="header">
+            <div class="search-bar" style="flex: 1;">
+                <span>🔍</span>
+                <input class="search-input" type="text" placeholder="Search code, errors, projects...">
+            </div>
+            
+            <button class="btn btn-primary">
+                📋 Copy Last Code
+            </button>
+            
+            <button class="btn btn-secondary">
+                ⚙️
+            </button>
+        </header>
+        
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value">24</div>
+                    <div class="stat-label">Code Blocks</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">156</div>
+                    <div class="stat-label">Versions</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">12</div>
+                    <div class="stat-label">Errors Fixed</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">5</div>
+                    <div class="stat-label">Active Projects</div>
+                </div>
+            </div>
+            
+            <!-- Recent Activity -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Recent Code Blocks</h3>
+                    <button class="btn btn-secondary btn-sm">View All</button>
+                </div>
+                
+                <div class="code-block">
+                    <div class="code-block-header">
+                        <span>Python</span>
+                        <span>v3.2.1</span>
+                    </div>
+                    <pre><code>def process_data(data):
+    """Process incoming data"""
+    if not data:
+        return None
+    
+    result = []
+    for item in data:
+        if item.get('active'):
+            result.append(process_item(item))
+    
+    return result</code></pre>
+                    <button class="copy-button">📋 Copy</button>
+                </div>
+                
+                <div class="code-block" style="margin-top: var(--spacing-md);">
+                    <div class="code-block-header">
+                        <span>JavaScript</span>
+                        <span class="badge badge-success">Fixed</span>
+                    </div>
+                    <pre><code>const fetchData = async (url) => {
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP error: ${response.status}`);
+        }
+        return await response.json();
+    } catch (error) {
+        console.error('Failed to fetch:', error);
+        return null;
+    }
+};</code></pre>
+                    <button class="copy-button">📋 Copy</button>
+                </div>
+            </div>
+            
+            <!-- Version Timeline -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Version Timeline</h3>
+                    <button class="btn btn-secondary btn-sm">Export</button>
+                </div>
+                
+                <div class="timeline">
+                    <div class="timeline-item">
+                        <div class="timeline-dot"></div>
+                        <div>
+                            <strong>v3 - Optimized</strong>
+                            <p style="color: var(--gray-600);">Added error handling, improved performance</p>
+                            <small style="color: var(--gray-500);">2 minutes ago</small>
+                        </div>
+                    </div>
+                    
+                    <div class="timeline-item">
+                        <div class="timeline-dot fixed"></div>
+                        <div>
+                            <strong>v2 - Fixed</strong>
+                            <p style="color: var(--gray-600);">Fixed null pointer exception</p>
+                            <small style="color: var(--gray-500);">15 minutes ago</small>
+                        </div>
+                    </div>
+                    
+                    <div class="timeline-item">
+                        <div class="timeline-dot error"></div>
+                        <div>
+                            <strong>v1 - Error</strong>
+                            <p style="color: var(--error);">Had null pointer exception</p>
+                            <small style="color: var(--gray-500);">30 minutes ago</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Error Tracker -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Error Analytics</h3>
+                    <button class="btn btn-secondary btn-sm">Details</button>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--spacing-md);">
+                    <div style="text-align: center;">
+                        <div class="badge badge-error" style="margin-bottom: var(--spacing-sm);">TypeError</div>
+                        <div style="font-size: var(--font-size-xl); font-weight: 600;">5</div>
+                        <small style="color: var(--gray-600);">occurrences</small>
+                    </div>
+                    
+                    <div style="text-align: center;">
+                        <div class="badge badge-warning" style="margin-bottom: var(--spacing-sm);">SyntaxError</div>
+                        <div style="font-size: var(--font-size-xl); font-weight: 600;">3</div>
+                        <small style="color: var(--gray-600);">occurrences</small>
+                    </div>
+                    
+                    <div style="text-align: center;">
+                        <div class="badge badge-info" style="margin-bottom: var(--spacing-sm);">ImportError</div>
+                        <div style="font-size: var(--font-size-xl); font-weight: 600;">2</div>
+                        <small style="color: var(--gray-600);">occurrences</small>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Example Toast Notification -->
+    <div class="toast success">
+        <span>✅</span>
+        <span>Code copied to VS Code successfully!</span>
+    </div>
+</body>
+</html>
+Summary
+I've created comprehensive documentation including:
+
+1. PROJECT.md
+Complete project overview and architecture
+
+Detailed file structure
+
+Technology stack
+
+Database schema
+
+Security considerations
+
+Performance metrics
+
+Testing strategy
+
+Roadmap
+
+Contributing guidelines
+
+2. USER_GUIDE.md
+Step-by-step installation guide
+
+Configuration options
+
+Basic and advanced usage
+
+Troubleshooting guide
+
+FAQ section
+
+Resources and support
+
+3. UI/UX Design System
+Complete color palette and typography
+
+Responsive dashboard layout
+
+Navigation components
+
+Cards and buttons
+
+Code blocks with copy functionality
+
+Version timeline visualization
+
+Error tracking display
+
+Modals and notifications
+
+Dark mode support
+
+Animations and transitions
+
+Mobile responsive design
+
+This creates a professional, well-documented, and user-friendly system that's ready for production use. The UI/UX design follows modern design principles with a focus on usability, accessibility, and visual appeal.

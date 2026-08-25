@@ -1,0 +1,25 @@
+{
+  "name": "nj-ide-copier",
+  "displayName": "NJ IDE Copier",
+  "description": "Receive code from DeepSeek AI chat directly into VS Code",
+  "version": "2.0.0",
+  "publisher": "nj-ide-copier",
+  "engines": { "vscode": "^1.74.0" },
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "nj-ide-copier.startServer", "title": "NJ IDE Copier: Start Server" },
+      { "command": "nj-ide-copier.insertCode", "title": "NJ IDE Copier: Insert Code at Cursor" }
+    ],
+    "keybindings": [
+      { "command": "nj-ide-copier.insertCode", "key": "ctrl+shift+d", "mac": "cmd+shift+d" }
+    ],
+    "configuration": {
+      "title": "NJ IDE Copier",
+      "properties": {
+        "nj-ide-copier.autoInsert": { "type": "boolean", "default": true, "description": "Auto-insert code at cursor position" },
+        "nj-ide-copier.serverPort": { "type": "number", "default": 8765, "description": "Server port" }
+      }
+    }
+  }
+}
