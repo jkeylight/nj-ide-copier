@@ -8,9 +8,18 @@
 </head>
 <body>
     <div class="dashboard">
-        <aside class="sidebar">
+        <!-- Toggle Button - Always Visible -->
+        <button class="dashboard-toggle-btn" id="dashboardToggle" title="Toggle Dashboard">
+            📊 Dashboard
+        </button>
+        
+        <!-- Sidebar - Hidden by Default -->
+        <aside class="sidebar" id="dashboardSidebar" style="transform: translateX(-100%);">
             <div style="padding: 16px; margin-bottom: 24px;">
-                <h2 style="color: #2196F3; font-size: 20px;">🚀 NJ IDE Copier</h2>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2 style="color: #2196F3; font-size: 20px;">🚀 NJ IDE Copier</h2>
+                    <button class="sidebar-close-btn" id="sidebarClose">×</button>
+                </div>
             </div>
             <nav>
                 <a class="nav-item active" href="#dashboard">📊 Dashboard</a>
@@ -63,6 +72,123 @@
             </div>
         </main>
     </div>
+    
+    <!-- Styles for toggle -->
+    <style>
+        .dashboard-toggle-btn {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 999999;
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            transition: all 0.3s;
+        }
+        
+        .dashboard-toggle-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+        }
+        
+        .sidebar-close-btn {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            font-size: 20px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        
+        .sidebar-close-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            width: 250px;
+            background: #1a1a2e;
+            transition: transform 0.3s ease;
+            z-index: 1000000;
+            overflow-y: auto;
+        }
+        
+        .sidebar.open {
+            transform: translateX(0) !important;
+        }
+        
+        body.sidebar-open .dashboard {
+            margin-left: 250px;
+        }
+        
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+            }
+        }
+    </style>
+    
+    <script>
+        // Toggle dashboard sidebar
+        const toggleBtn = document.getElementById('dashboardToggle');
+        const sidebar = document.getElementById('dashboardSidebar');
+        const closeBtn = document.getElementById('sidebarClose');
+        
+        toggleBtn.addEventListener('click', () => {
+            sidebar.classList.add('open');
+            document.body.classList.add('sidebar-open');
+        });
+        
+        closeBtn.addEventListener('click', () => {
+            sidebar.classList.remove('open');
+            document.body.classList.remove('sidebar-open');
+        });
+        
+        // Close when clicking outside
+        document.addEventListener('click', (e) => {
+            if (sidebar.classList.contains('open') && 
+                !sidebar.contains(e.target) && 
+                e.target !== toggleBtn) {
+                sidebar.classList.remove('open');
+                document.body.classList.remove('sidebar-open');
+            }
+        });
+        
+        // Handle navigation
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.preventDefault();
+                const hash = item.getAttribute('href');
+                window.location.hash = hash.substring(1);
+                
+                // Update active state
+                document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                
+                // Close sidebar on mobile
+                if (window.innerWidth <= 768) {
+                    sidebar.classList.remove('open');
+                    document.body.classList.remove('sidebar-open');
+                }
+            });
+        });
+    </script>
+    
     <script src="dashboard.js"></script>
 </body>
 </html>
