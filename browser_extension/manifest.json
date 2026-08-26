@@ -24,7 +24,8 @@
     "*://huggingface.co/chat/*",
     "*://poe.com/*",
     "*://you.com/*",
-    "*://perplexity.ai/*"
+    "*://perplexity.ai/*",
+    "*://arena.ai/*"
   ],
   "content_scripts": [{
     "matches": [

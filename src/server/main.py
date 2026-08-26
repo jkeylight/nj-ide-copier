@@ -2,13 +2,15 @@
 Main Server - SmartDeepSeekServer orchestrator.
 
 This is the main entry point that coordinates version management,
-error tracking, IDE detection, and file management.
+error tracking, IDE detection, file management, and chat export.
+Version 2.0 - Improved with robust error handling.
 """
 
 import json
 import re
 import time
 import sys
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 from http.server import HTTPServer
@@ -17,14 +19,11 @@ from src.core.version_manager import CodeVersionManager, CodeStatus
 from src.core.error_tracker import ErrorTracker
 from src.core.ide_detector import IDEDetector
 from src.core.file_manager import FileManager
+from src.core.chat_exporter import ChatExporter
 from src.server.config import Config
 from src.server.api_handler import SmartAPIHandler
 
-try:
-    import pyperclip
-    HAS_CLIPBOARD = True
-except Exception:
-    HAS_CLIPBOARD = False
+logger = logging.getLogger("nj_ide_copier")
 
 
 class SmartDeepSeekServer:
@@ -38,7 +37,11 @@ class SmartDeepSeekServer:
         self.error_tracker = ErrorTracker()
         self.ide_detector = IDEDetector()
         self.file_manager = FileManager(self.config.storage_dir)
+        self.chat_exporter = ChatExporter(self.config.storage_dir / "exports")
         self.history: List[Dict] = []
+        
+        logger.info("NJ IDE Copier Server v2.0 initialized")
+        logger.info(f"Storage directory: {self.config.storage_dir}")
 
     def handle_code_update(
         self,
@@ -47,7 +50,7 @@ class SmartDeepSeekServer:
         context: Optional[Dict] = None,
         error_info: Optional[Dict] = None,
     ) -> Dict:
-        """Handle code update with version tracking."""
+        """Handle code update with version tracking and error detection."""
         result = {
             "status": "success",
             "action": "created",
@@ -56,12 +59,22 @@ class SmartDeepSeekServer:
             "changes": None,
             "error_detected": False,
             "suggestions": [],
+            "file_path": None,
         }
+
+        # Validate inputs
+        if not code:
+            result["status"] = "error"
+            result["message"] = "Code cannot be empty"
+            return result
+
+        if not language:
+            language = "text"
 
         # Track errors if present
         if error_info and self.config.enable_error_tracking:
             self.error_tracker.track_error(
-                code, error_info.get("message", ""), language
+                code, error_info.get("message", ""), language, context
             )
             result["error_detected"] = True
 
@@ -75,48 +88,58 @@ class SmartDeepSeekServer:
 
         # Update version manager
         if self.config.enable_versioning:
-            block = self.version_manager.add_or_update_block(
-                code, language, context, error_info
-            )
-            result["block_id"] = block.block_id
-            result["version"] = block.current_version
+            try:
+                block = self.version_manager.add_or_update_block(
+                    code, language, context, error_info
+                )
+                result["block_id"] = block.block_id
+                result["version"] = block.current_version
 
-            # Check if this is an update
-            if len(block.versions) > 1:
-                result["action"] = "updated"
+                # Check if this is an update
+                if len(block.versions) > 1:
+                    result["action"] = "updated"
 
-                # Get changes
-                old_version = block.get_version(block.versions[-2].version_id)
-                if old_version:
-                    changes = self.version_manager.detect_changes(
-                        old_version.code, code
+                    # Get changes
+                    old_version = block.get_version(block.versions[-2].version_id)
+                    if old_version:
+                        changes = self.version_manager.detect_changes(
+                            old_version.code, code
+                        )
+                        result["changes"] = changes
+
+                    # Check if error fix
+                    if block.versions[-1].status == CodeStatus.FIXED:
+                        result["action"] = "error_fixed"
+                        self.error_tracker.mark_error_fixed(
+                            error_info.get("message", "") if error_info else ""
+                        )
+
+                # Create file if needed (only for new, non-error code)
+                if not error_info:
+                    file_path = self.file_manager.create_code_file(
+                        code, language, block.block_id
                     )
-                    result["changes"] = changes
+                    result["file_path"] = str(file_path)
 
-                # Check if error fix
-                if block.versions[-1].status == CodeStatus.FIXED:
-                    result["action"] = "error_fixed"
-
-        # Create file if needed
-        if not error_info:
-            file_path = self.file_manager.create_code_file(
-                code, language, result.get("block_id")
-            )
-            result["file_path"] = str(file_path)
-
-            # Update block with file path
-            if result.get("block_id"):
-                block = self.version_manager.get_block(result["block_id"])
-                if block:
+                    # Update block with file path
                     block.file_path = file_path
                     self.version_manager.save_state()
+                    
+            except Exception as e:
+                logger.error(f"Version management error: {e}")
+                result["status"] = "warning"
+                result["message"] = f"Version tracking error: {str(e)}"
 
         # Copy to clipboard
-        if HAS_CLIPBOARD:
-            try:
-                pyperclip.copy(code)
-            except Exception:
-                pass
+        self._copy_to_clipboard(code)
+
+        # Add to history
+        self.history.append({
+            "timestamp": time.time(),
+            "action": result["action"],
+            "language": language,
+            "block_id": result.get("block_id"),
+        })
 
         return result
 
@@ -129,14 +152,27 @@ class SmartDeepSeekServer:
             "blocks_created": 0,
             "error_fixes": 0,
             "project_files": [],
+            "export_file": None,
         }
 
         messages = chat_data.get("messages", [])
+        
+        if not messages:
+            result["status"] = "error"
+            result["message"] = "No messages to process"
+            return result
 
         for message in messages:
             code_blocks = message.get("codeBlocks", [])
+            
+            # Also try to extract from content if no explicit blocks
+            if not code_blocks:
+                code_blocks = self.chat_exporter.extract_code_blocks_from_message(message)
 
             for block in code_blocks:
+                if not block.get("code"):
+                    continue
+                    
                 context = {
                     "message_id": message.get("id"),
                     "role": message.get("role"),
@@ -146,106 +182,184 @@ class SmartDeepSeekServer:
                 # Check for error indicators
                 error_info = None
                 if self._contains_error_indicators(message.get("content", "")):
-                    error_info = {
-                        "message": self._extract_error_message(
-                            message.get("content", "")
-                        ),
-                        "context": message.get("content", "")[:500],
-                    }
+                    error_message = self._extract_error_message(
+                        message.get("content", "")
+                    )
+                    if error_message:
+                        error_info = {
+                            "message": error_message,
+                            "context": message.get("content", "")[:500],
+                        }
 
-                update_result = self.handle_code_update(
-                    block.get("code", ""),
-                    block.get("language", "text"),
-                    context,
-                    error_info,
-                )
+                try:
+                    update_result = self.handle_code_update(
+                        block.get("code", ""),
+                        block.get("language", "text"),
+                        context,
+                        error_info,
+                    )
 
-                result["blocks_processed"] += 1
+                    result["blocks_processed"] += 1
 
-                if update_result["action"] == "updated":
-                    result["blocks_updated"] += 1
-                elif update_result["action"] == "error_fixed":
-                    result["error_fixes"] += 1
-                elif update_result["action"] == "created":
-                    result["blocks_created"] += 1
+                    if update_result["action"] == "updated":
+                        result["blocks_updated"] += 1
+                    elif update_result["action"] == "error_fixed":
+                        result["error_fixes"] += 1
+                    elif update_result["action"] == "created":
+                        result["blocks_created"] += 1
 
-                if "file_path" in update_result:
-                    result["project_files"].append(update_result["file_path"])
+                    if update_result.get("file_path"):
+                        result["project_files"].append(update_result["file_path"])
+                        
+                except Exception as e:
+                    logger.error(f"Error processing code block: {e}")
+                    result["blocks_processed"] += 1  # Count it even if failed
 
         return result
 
+    def export_chat(self, chat_data: Dict, filename: Optional[str] = None) -> Dict:
+        """Export chat to markdown file."""
+        try:
+            file_path = self.chat_exporter.export_chat(chat_data, filename)
+            summary = self.chat_exporter.export_summary(chat_data)
+            
+            return {
+                "status": "success",
+                "file_path": str(file_path),
+                "filename": file_path.name,
+                "summary": summary,
+            }
+        except Exception as e:
+            logger.error(f"Chat export error: {e}")
+            return {
+                "status": "error",
+                "message": str(e),
+            }
+
     def _contains_error_indicators(self, text: str) -> bool:
         """Check if text contains error indicators."""
+        if not text:
+            return False
+            
         error_patterns = [
-            r"error", r"Error", r"exception", r"Exception",
-            r"traceback", r"Traceback", r"failed", r"Failed",
-            r"bug", r"Bug", r"issue", r"Issue",
-            r"problem", r"Problem", r"not working",
-            r"doesn't work", r"fix", r"Fix",
+            r"\berror\b", r"\bError\b", r"\bERROR\b",
+            r"\bexception\b", r"\bException\b",
+            r"\btraceback\b", r"\bTraceback\b",
+            r"\bfailed\b", r"\bFailed\b",
+            r"\bbug\b", r"\bBug\b",
+            r"\bissue\b", r"\bIssue\b",
+            r"\bproblem\b", r"\bProblem\b",
+            r"\bnot working\b",
+            r"\bdoesn't work\b",
+            r"\bfix\b", r"\bFix\b",
+            r"\[Errno", r"\berrno\b",
         ]
-        return any(re.search(p, text) for p in error_patterns)
+        return any(re.search(p, text, re.IGNORECASE) for p in error_patterns)
 
-    def _extract_error_message(self, text: str) -> str:
+    def _extract_error_message(self, text: str) -> Optional[str]:
         """Extract error message from text."""
+        if not text:
+            return None
+            
         patterns = [
             r"(?:Error|Exception|Traceback)[:\s]+(.+?)(?:\n|$)",
             r"(?:error|exception)[:\s]+(.+?)(?:\n|$)",
             r"Failed[:\s]+(.+?)(?:\n|$)",
+            r"\[Errno \d+\] (.+?)(?:\n|$)",
         ]
+        
         for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
             if match:
-                return match.group(1).strip()
-        return "Unknown error"
+                error_text = match.group(1).strip()
+                if error_text and len(error_text) > 3:
+                    return error_text[:200]  # Limit length
+        
+        return None
+
+    def _copy_to_clipboard(self, code: str):
+        """Copy code to clipboard if available."""
+        try:
+            import pyperclip
+            pyperclip.copy(code)
+            logger.debug("Code copied to clipboard")
+        except ImportError:
+            logger.debug("pyperclip not available, skipping clipboard")
+        except Exception as e:
+            logger.warning(f"Clipboard copy failed: {e}")
 
     def get_version_history(self, block_id: Optional[str] = None) -> Dict:
         """Get version history."""
-        if block_id:
-            block = self.version_manager.get_block(block_id)
-            if block:
-                return {"status": "success", "block": block.to_dict()}
-            return {"status": "error", "message": "Block not found"}
-
-        return {
-            "status": "success",
-            "blocks": [b.to_dict() for b in self.version_manager.get_all_blocks()],
-        }
+        try:
+            if block_id:
+                block = self.version_manager.get_block(block_id)
+                if block:
+                    return {"status": "success", "block": block.to_dict()}
+                return {"status": "error", "message": "Block not found"}
+            
+            blocks = self.version_manager.get_all_blocks()
+            return {
+                "status": "success",
+                "blocks": [b.to_dict() for b in blocks],
+                "total": len(blocks),
+            }
+        except Exception as e:
+            logger.error(f"Version history error: {e}")
+            return {"status": "error", "message": str(e)}
 
     def revert_version(self, block_id: str, version_id: str) -> Dict:
         """Revert to a previous version."""
-        success = self.version_manager.revert_to_version(block_id, version_id)
+        try:
+            success = self.version_manager.revert_to_version(block_id, version_id)
 
-        if success:
-            block = self.version_manager.get_block(block_id)
-            if block and HAS_CLIPBOARD:
-                try:
-                    pyperclip.copy(block.get_current_code())
-                except Exception:
-                    pass
+            if success:
+                block = self.version_manager.get_block(block_id)
+                code = block.get_current_code() if block else ""
+                
+                # Copy to clipboard
+                self._copy_to_clipboard(code)
 
-            return {
-                "status": "success",
-                "message": f"Reverted to version {version_id}",
-                "current_version": block.current_version if block else version_id,
-            }
+                return {
+                    "status": "success",
+                    "message": f"Reverted to version {version_id}",
+                    "current_version": block.current_version if block else version_id,
+                    "code": code,
+                }
 
-        return {"status": "error", "message": "Failed to revert"}
+            return {"status": "error", "message": "Failed to revert"}
+        except Exception as e:
+            logger.error(f"Revert error: {e}")
+            return {"status": "error", "message": str(e)}
 
     def get_error_statistics(self) -> Dict:
         """Get error statistics."""
-        stats = self.error_tracker.get_error_statistics()
-        stats["status"] = "success"
-        return stats
+        try:
+            return self.error_tracker.get_error_statistics()
+        except Exception as e:
+            logger.error(f"Error statistics error: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def get_exports(self) -> List[Dict]:
+        """Get list of export files."""
+        return self.chat_exporter.get_recent_exports()
+
+
+def setup_logging(level: str = "INFO"):
+    """Set up logging configuration."""
+    logging.basicConfig(
+        level=getattr(logging, level.upper(), logging.INFO),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
 
 def main():
     """Start the NJ IDE Copier server."""
-    import logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-    )
-    logger = logging.getLogger("nj_ide_copier")
+    setup_logging()
+    
+    logger.info("=" * 60)
+    logger.info("NJ IDE Copier Server v2.0")
+    logger.info("=" * 60)
 
     server = SmartDeepSeekServer()
     SmartAPIHandler.server_instance = server
@@ -253,15 +367,28 @@ def main():
     host = server.config.server_host
     port = server.config.server_port
 
-    httpd = HTTPServer((host, port), SmartAPIHandler)
-    logger.info(f"NJ IDE Copier server running on http://{host}:{port}")
-    logger.info("Press Ctrl+C to stop.")
-
     try:
+        httpd = HTTPServer((host, port), SmartAPIHandler)
+        logger.info(f"Server running on http://{host}:{port}")
+        logger.info("Press Ctrl+C to stop.")
+        logger.info("-" * 60)
+        
         httpd.serve_forever()
+        
     except KeyboardInterrupt:
-        logger.info("Server stopped.")
-        httpd.server_close()
+        logger.info("Server stopped by user")
+    except OSError as e:
+        if e.errno == 98:  # Address already in use
+            logger.error(f"Port {port} is already in use")
+            logger.error("Stop the existing server or use a different port")
+            logger.info(f"Current port: {port}")
+            logger.info(f"Change in .env: DEEPSEEK_SERVER_PORT=8766")
+        else:
+            logger.error(f"Server error: {e}")
+            raise
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        raise
 
 
 if __name__ == "__main__":

@@ -1,87 +1,320 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NJ IDE Copier v2.0</title>
     <style>
-        body { width: 380px; padding: 15px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-        .header { text-align: center; margin-bottom: 16px; }
-        .header h2 { margin: 0; color: #333; font-size: 18px; }
-        .header p { margin: 4px 0 0; color: #666; font-size: 12px; }
-        .status { background: #f0f0f0; border-radius: 8px; padding: 10px; margin-bottom: 12px; }
-        .status-item { display: flex; justify-content: space-between; margin: 4px 0; font-size: 13px; }
-        .status-label { font-weight: 600; color: #555; }
-        .status-value { color: #2196F3; }
-        .platforms { background: #e8f5e9; border-radius: 8px; padding: 10px; margin-bottom: 12px; }
-        .platforms h4 { margin: 0 0 6px; font-size: 13px; color: #2e7d32; }
-        .platform-list { display: flex; flex-wrap: wrap; gap: 4px; }
-        .platform-tag { background: white; padding: 2px 8px; border-radius: 10px; font-size: 11px; color: #333; border: 1px solid #c8e6c9; }
-        .actions { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
-        button { padding: 10px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
-        button:hover { transform: scale(1.02); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
-        .primary-btn { background: #2196F3; color: white; }
-        .secondary-btn { background: #f0f0f0; color: #333; }
-        .success-btn { background: #4CAF50; color: white; }
-        .settings { padding-top: 12px; border-top: 1px solid #e0e0e0; }
-        select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-top: 4px; font-size: 13px; }
-        label { font-size: 12px; color: #666; display: block; margin-bottom: 4px; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            width: 320px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .header {
+            background: rgba(0,0,0,0.2);
+            padding: 16px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .header h1 {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        
+        .header .version {
+            font-size: 11px;
+            opacity: 0.8;
+        }
+        
+        .server-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 8px;
+            padding: 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+            font-size: 12px;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #666;
+        }
+        
+        .status-dot.connected {
+            background: #4CAF50;
+        }
+        
+        .status-dot.disconnected {
+            background: #f44336;
+        }
+        
+        .section {
+            padding: 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .section-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            opacity: 0.8;
+            margin-bottom: 12px;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 8px;
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.2s;
+        }
+        
+        .btn:hover {
+            background: rgba(255,255,255,0.25);
+            transform: translateX(4px);
+        }
+        
+        .btn:active {
+            transform: translateX(2px);
+        }
+        
+        .btn:last-child {
+            margin-bottom: 0;
+        }
+        
+        .btn-primary {
+            background: #4CAF50;
+            border-color: #4CAF50;
+        }
+        
+        .btn-primary:hover {
+            background: #45a049;
+        }
+        
+        .btn-export {
+            background: #9C27B0;
+            border-color: #9C27B0;
+        }
+        
+        .btn-export:hover {
+            background: #7B1FA2;
+        }
+        
+        .btn-stats {
+            background: #FF9800;
+            border-color: #FF9800;
+        }
+        
+        .btn-stats:hover {
+            background: #F57C00;
+        }
+        
+        .btn-icon {
+            font-size: 18px;
+        }
+        
+        .btn-text {
+            flex: 1;
+        }
+        
+        .platforms {
+            padding: 16px;
+            background: rgba(0,0,0,0.1);
+            font-size: 11px;
+            text-align: center;
+        }
+        
+        .platforms-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+            opacity: 0.8;
+        }
+        
+        .platforms-list {
+            opacity: 0.7;
+            line-height: 1.6;
+        }
+        
+        .arena-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            margin-top: 4px;
+        }
+        
+        #stats-modal, #exports-modal {
+            display: none;
+        }
+        
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-content {
+            background: white;
+            color: #333;
+            border-radius: 12px;
+            max-width: 450px;
+            width: 95%;
+            max-height: 80vh;
+            overflow: auto;
+        }
+        
+        .modal-header {
+            padding: 16px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .modal-header h3 {
+            margin: 0;
+            font-size: 16px;
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+        }
+        
+        .modal-body {
+            padding: 16px;
+            font-size: 13px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+        
+        .footer {
+            padding: 12px;
+            text-align: center;
+            font-size: 10px;
+            opacity: 0.7;
+        }
     </style>
 </head>
 <body>
     <div class="header">
-        <h2><span style="font-size:20px">&#128640;</span> NJ IDE Copier</h2>
-        <p>Works with all AI chat platforms</p>
-    </div>
-
-    <div class="status" id="status">
-        <div class="status-item">
-            <span class="status-label">Server:</span>
-            <span class="status-value" id="serverStatus">Checking...</span>
-        </div>
-        <div class="status-item">
-            <span class="status-label">Platform:</span>
-            <span class="status-value" id="currentPlatform">Detecting...</span>
-        </div>
-        <div class="status-item">
-            <span class="status-label">Active IDE:</span>
-            <span class="status-value" id="activeIDE">Detecting...</span>
+        <h1>🎯 NJ IDE Copier</h1>
+        <div class="version">Version 2.0.0</div>
+        <div class="server-status">
+            <div class="status-dot" id="status-dot"></div>
+            <span>Server: <span id="status-text">Checking...</span></span>
         </div>
     </div>
-
+    
+    <div class="section">
+        <div class="section-title">📋 Quick Actions</div>
+        <button class="btn btn-primary" id="btn-copy-last">
+            <span class="btn-icon">📝</span>
+            <span class="btn-text">Copy Last Code</span>
+        </button>
+        <button class="btn" id="btn-copy-all">
+            <span class="btn-icon">📚</span>
+            <span class="btn-text">Copy All Code Blocks</span>
+        </button>
+    </div>
+    
+    <div class="section">
+        <div class="section-title">💾 Export</div>
+        <button class="btn btn-export" id="btn-export-chat">
+            <span class="btn-icon">📄</span>
+            <span class="btn-text">Export Full Chat</span>
+        </button>
+        <button class="btn btn-export" id="btn-export-md">
+            <span class="btn-icon">📝</span>
+            <span class="btn-text">Export as Markdown</span>
+        </button>
+    </div>
+    
+    <div class="section">
+        <div class="section-title">📊 Statistics</div>
+        <button class="btn btn-stats" id="btn-stats">
+            <span class="btn-icon">📈</span>
+            <span class="btn-text">View Error Stats</span>
+        </button>
+        <button class="btn btn-stats" id="btn-exports">
+            <span class="btn-icon">📂</span>
+            <span class="btn-text">List Exports</span>
+        </button>
+    </div>
+    
     <div class="platforms">
-        <h4>&#10004; Supported Platforms</h4>
-        <div class="platform-list">
-            <span class="platform-tag">ChatGPT</span>
-            <span class="platform-tag">Claude</span>
-            <span class="platform-tag">DeepSeek</span>
-            <span class="platform-tag">Qwen</span>
-            <span class="platform-tag">Gemini</span>
-            <span class="platform-tag">Kimi</span>
-            <span class="platform-tag">ChatGLM</span>
-            <span class="platform-tag">HuggingChat</span>
-            <span class="platform-tag">Poe</span>
-            <span class="platform-tag">Perplexity</span>
-            <span class="platform-tag">You.com</span>
+        <div class="platforms-title">Supported Platforms:</div>
+        <div class="platforms-list">
+            ChatGPT • Claude • DeepSeek • Gemini • Qwen • Kimi • HuggingChat • Perplexity • Arena.ai
+        </div>
+        <div class="arena-badge">🎯 Arena.ai Added!</div>
+    </div>
+    
+    <div class="footer">
+        NJ IDE Copier v2.0 • Server Port: 8765
+    </div>
+    
+    <!-- Stats Modal -->
+    <div id="stats-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📊 Error Statistics</h3>
+                <button class="modal-close" onclick="closeModal('stats-modal')">×</button>
+            </div>
+            <div class="modal-body" id="stats-content">
+                Loading...
+            </div>
         </div>
     </div>
-
-    <div class="actions">
-        <button class="primary-btn" id="copyFullChat">&#128196; Copy Full Chat</button>
-        <button class="success-btn" id="copyLastResponse">&#128203; Copy Last Response</button>
-        <button class="primary-btn" id="copyAllCode">&#128187; Copy All Code Blocks</button>
-        <button class="secondary-btn" id="exportMarkdown">&#128221; Export as Markdown</button>
+    
+    <!-- Exports Modal -->
+    <div id="exports-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📂 Recent Exports</h3>
+                <button class="modal-close" onclick="closeModal('exports-modal')">×</button>
+            </div>
+            <div class="modal-body" id="exports-content">
+                Loading...
+            </div>
+        </div>
     </div>
-
-    <div class="settings">
-        <label for="ideSelect">Target IDE:</label>
-        <select id="ideSelect">
-            <option value="auto">Auto-detect</option>
-            <option value="vscode">Visual Studio Code</option>
-            <option value="pycharm">PyCharm</option>
-            <option value="intellij">IntelliJ IDEA</option>
-            <option value="sublime">Sublime Text</option>
-            <option value="atom">Atom</option>
-        </select>
-    </div>
-
+    
     <script src="popup.js"></script>
 </body>
 </html>
